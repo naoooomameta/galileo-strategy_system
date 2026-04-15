@@ -3184,6 +3184,10 @@ async function doLogin() {
     document.getElementById('login-screen').style.display = 'none';
     document.getElementById('app-body').style.display = 'block';
     _appInitialized = true;
+    // ★ DEVモードでもlocalStorageから生徒リストを読み込み
+    _allStudents = _loadStudentsFromLocalStorage();
+    renderStudentList();
+    _restoreLastStudent();
     showPage('dashboard');
     return;
   }
@@ -3262,12 +3266,16 @@ _sb.auth.onAuthStateChange(async function(event, session) {
 // ページ離脱・リロード前にキャッシュを保存
 window.addEventListener('beforeunload', function() {
   _cacheSaveCurrentStudent(true);
+  // ★ 生徒リストをlocalStorageに確実に保存
+  _saveStudentsToLocalStorage();
 });
 
 // タブが非表示になった時もキャッシュを保存（モバイルでのタブ切替対応）
 document.addEventListener('visibilitychange', function() {
   if (document.visibilityState === 'hidden') {
     _cacheSaveCurrentStudent(false);
+    // ★ 生徒リストもlocalStorageに保存
+    _saveStudentsToLocalStorage();
   }
 });
 
@@ -3463,15 +3471,94 @@ setInterval(_sbKeepAlive, 6 * 60 * 60 * 1000);
 // 起動時に1回実行
 setTimeout(_sbKeepAlive, 5000);
 
+// ===== localStorage生徒リスト永続化 =====
+// Supabaseが停止・接続不可でもデータを失わないよう、localStorageを一次ストレージとして使用
+function _saveStudentsToLocalStorage() {
+  try {
+    var data = _allStudents.map(function(s) {
+      // 循環参照やDOMを含まない純粋データのみ保存
+      var clone = JSON.parse(JSON.stringify(s));
+      // roadmapHtmlは巨大なのでlocalStorage版では除外（Supabase/メモリキャッシュに任せる）
+      delete clone.roadmapHtml;
+      return clone;
+    });
+    localStorage.setItem('galileo_students', JSON.stringify(data));
+    console.log('[LS] 生徒リスト保存:', data.length, '件');
+  } catch(e) {
+    console.warn('[LS] 生徒リスト保存失敗:', e);
+    // 容量オーバーの場合、古いキャッシュを削除してリトライ
+    try {
+      _clearOldLocalStorageCache('');
+      var data2 = _allStudents.map(function(s) {
+        var clone = JSON.parse(JSON.stringify(s));
+        delete clone.roadmapHtml;
+        return clone;
+      });
+      localStorage.setItem('galileo_students', JSON.stringify(data2));
+    } catch(e2) { console.error('[LS] リトライも失敗:', e2); }
+  }
+}
+
+function _loadStudentsFromLocalStorage() {
+  try {
+    var raw = localStorage.getItem('galileo_students');
+    if (raw) {
+      var data = JSON.parse(raw);
+      if (Array.isArray(data) && data.length > 0) {
+        console.log('[LS] 生徒リスト読込:', data.length, '件');
+        return data;
+      }
+    }
+  } catch(e) {
+    console.warn('[LS] 生徒リスト読込失敗:', e);
+  }
+  return [];
+}
+
 // ===== 生徒リスト管理（REST API版）=====
 async function _loadStudentsFromSupabase() {
   console.log('[DEBUG] _loadStudentsFromSupabase called');
+  // ★ まずlocalStorageから即座に読み込み（Supabase応答を待たずにUIを表示）
+  var lsStudents = _loadStudentsFromLocalStorage();
+  if (lsStudents.length > 0 && _allStudents.length === 0) {
+    _allStudents = lsStudents;
+    renderStudentList();
+    renderWpStudentSelect();
+    renderMonthlyStudentSelect();
+    renderPredStudentSelect();
+    console.log('[LS] localStorageから先行ロード:', lsStudents.length, '件');
+  }
   try {
     var query = 'select=*&order=created_at.asc';
     const data = await _sbRestGet('students', query);
-    _allStudents = (data || []).map(_rowToStudent);
+    var sbStudents = (data || []).map(_rowToStudent);
     _supabaseConnected = true;
     _hideSupabaseError();
+    // ★ SupabaseデータとlocalStorageデータをマージ
+    // Supabaseに存在する生徒を基準に、localStorageの未同期データも保持
+    if (sbStudents.length > 0) {
+      // localStorageにしか存在しない生徒（Supabase未同期）を検出
+      var localOnly = _allStudents.filter(function(ls) {
+        return !ls._id && !sbStudents.find(function(sb) { return sb.name === ls.name; });
+      });
+      _allStudents = sbStudents;
+      // localStorageのみの生徒を追加し、Supabaseへの同期を試みる
+      localOnly.forEach(function(ls) {
+        _allStudents.push(ls);
+        // バックグラウンドでSupabaseへ同期
+        _sbRestPost('students', _studentToRow(ls)).then(function(result) {
+          if (result && result[0]) {
+            var idx = _allStudents.findIndex(function(x) { return x.name === ls.name; });
+            if (idx >= 0) _allStudents[idx]._id = result[0].id;
+            _saveStudentsToLocalStorage();
+            console.log('[SYNC] localStorage→Supabase同期成功:', ls.name);
+          }
+        }).catch(function(e) { console.warn('[SYNC] 同期失敗:', ls.name, e.message); });
+      });
+    } else if (lsStudents.length > 0) {
+      // Supabaseが空だがlocalStorageにデータがある場合、localStorage優先
+      _allStudents = lsStudents;
+    }
     // currentStudentがある場合、新しい_allStudentsの該当エントリを同期
     if (currentStudent) {
       var _csIdx = _allStudents.findIndex(function(x) {
@@ -3484,13 +3571,17 @@ async function _loadStudentsFromSupabase() {
         Object.assign(_allStudents[_csIdx], currentStudent);
       }
     }
+    // ★ Supabase成功時、localStorageも最新に更新
+    _saveStudentsToLocalStorage();
     console.log('[DEBUG] Loaded', _allStudents.length, 'students from Supabase');
   } catch(e) {
     console.warn('DB読込エラー:', e.message);
     _supabaseConnected = false;
-    _showSupabaseError('エラー詳細: ' + e.message + '　— Supabaseプロジェクトが停止中（Paused）の場合は、Dashboardから「Restore project」で復元してください。データは消えていません。');
-    // エラー時は既存の_allStudentsを保持（空配列にしない）
-    if (_allStudents.length === 0) _allStudents = [];
+    _showSupabaseError('エラー詳細: ' + e.message + '　— Supabaseプロジェクトが停止中（Paused）の場合は、Dashboardから「Restore project」で復元してください。データはブラウザに保存されています。');
+    // ★ Supabase失敗時はlocalStorageのデータを使用
+    if (_allStudents.length === 0 && lsStudents.length > 0) {
+      _allStudents = lsStudents;
+    }
   }
   renderStudentList();
   renderWpStudentSelect();
@@ -3582,6 +3673,8 @@ async function saveStudentToList(s) {
   } else {
     _allStudents.push(Object.assign({}, s, { roadmapCount: 1 }));
   }
+  // ★ localStorageに即時保存（Supabase失敗時もデータを保持）
+  _saveStudentsToLocalStorage();
   renderStudentList();
   renderWpStudentSelect();
   renderMonthlyStudentSelect();
@@ -3608,8 +3701,8 @@ async function saveStudentToList(s) {
   } catch(e) {
     console.error('[DEBUG] saveStudentToList error:', e);
     _supabaseConnected = false;
-    _showSupabaseError('保存エラー: ' + e.message + '　— データはブラウザ内にのみ保持されています。Supabaseの状態を確認してください。');
-    showToast('⚠ DB保存失敗：ブラウザを閉じるとデータが消える可能性があります');
+    _showSupabaseError('保存エラー: ' + e.message + '　— データはブラウザに保存済みです。Supabaseの状態を確認してください。');
+    showToast(s.name + ' を保存しました（ローカル）');
   }
 }
 
@@ -3619,10 +3712,21 @@ async function deleteStudentFromList(name) {
   if (s && s._id) {
     try {
       await _sbRestDelete('students', s._id);
-    } catch(e) { showToast('削除エラー: ' + e.message); return; }
+    } catch(e) { showToast('削除エラー: ' + e.message); }
   }
+  // ★ localStorageからも削除
+  _allStudents = _allStudents.filter(function(x) { return x.name !== name; });
+  _saveStudentsToLocalStorage();
+  // localStorageの個別キャッシュも削除
+  try {
+    var cacheKey = (s && s._id) || name;
+    localStorage.removeItem('galileo_cache_' + cacheKey);
+  } catch(e) {}
   if (currentStudent && currentStudent.name === name) currentStudent = null;
-  await _loadStudentsFromSupabase();
+  renderStudentList();
+  renderWpStudentSelect();
+  renderMonthlyStudentSelect();
+  renderPredStudentSelect();
   showToast(name + ' を削除しました');
 }
 
@@ -4024,6 +4128,17 @@ function _cacheSaveCurrentStudent(destroyCharts) {
   cache._studentData = JSON.parse(JSON.stringify(currentStudent));
   _studentCache[cacheKey] = cache;
 
+  // ★ currentStudentの全データを_allStudentsにも同期（localStorage保存の整合性のため）
+  var _syncIdx = _allStudents.findIndex(function(x) {
+    return (x._id && currentStudent._id && x._id === currentStudent._id) || x.name === currentStudent.name;
+  });
+  if (_syncIdx >= 0) {
+    // roadmapHtml以外の全データを同期
+    var _syncData = JSON.parse(JSON.stringify(currentStudent));
+    delete _syncData.roadmapHtml; // 巨大HTMLは除外
+    Object.assign(_allStudents[_syncIdx], _syncData);
+  }
+
   // localStorageにも永続化（リロード耐性）
   _persistCacheToLocalStorage(cacheKey, cache);
 
@@ -4149,8 +4264,31 @@ function _restoreWpFromCache() {
 setInterval(function() {
   if (currentStudent && document.visibilityState !== 'hidden') {
     _cacheSaveCurrentStudent(false);
+    // ★ 生徒リストもlocalStorageに定期保存
+    _saveStudentsToLocalStorage();
   }
 }, 30000);
+
+// ★ 定期的にSupabaseへ自動同期（60秒ごと、編集データをDBに永続化）
+var _lastAutoSyncTime = 0;
+setInterval(function() {
+  if (!currentStudent || document.visibilityState === 'hidden') return;
+  if (!_supabaseConnected && !_GALILEO_DEV_MODE) return;
+  var now = Date.now();
+  if (now - _lastAutoSyncTime < 55000) return; // 最低55秒間隔
+  _lastAutoSyncTime = now;
+  // currentStudentの最新データを_allStudentsに同期してからSupabaseへ保存
+  _syncEditedFieldsToData();
+  var idx = _allStudents.findIndex(function(x) {
+    return (x._id && currentStudent._id && x._id === currentStudent._id) || x.name === currentStudent.name;
+  });
+  if (idx >= 0) Object.assign(_allStudents[idx], currentStudent);
+  saveStudentToList(currentStudent).then(function() {
+    console.log('[AUTOSYNC] Supabase自動同期成功:', currentStudent.name);
+  }).catch(function(e) {
+    console.warn('[AUTOSYNC] Supabase自動同期失敗:', e.message);
+  });
+}, 60000);
 
 // キャッシュからページを復元。成功したらtrue
 function _cacheRestoreStudent(s) {
