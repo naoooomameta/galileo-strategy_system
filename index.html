@@ -3594,8 +3594,24 @@ async function _loadStudentsFromSupabase() {
       if (_csIdx >= 0) {
         // DB側の_idを確実にcurrentStudentに反映
         if (_allStudents[_csIdx]._id) currentStudent._id = _allStudents[_csIdx]._id;
-        // currentStudentのローカル編集を_allStudentsにマージ
-        Object.assign(_allStudents[_csIdx], currentStudent);
+        // ★ updated_atを比較して新しい方を採用（複数端末対応）
+        var sbUpdated = _allStudents[_csIdx].updated_at || '';
+        var localUpdated = currentStudent.updated_at || '';
+        if (sbUpdated > localUpdated) {
+          // Supabase側が新しい → ローカルを更新（別端末での編集を反映）
+          var localRoadmapHtml = currentStudent.roadmapHtml;
+          Object.assign(currentStudent, _allStudents[_csIdx]);
+          console.log('[MERGE] Supabase側が新しい → ローカルを更新:', currentStudent.name);
+        } else {
+          // ローカル側が新しい → Supabaseデータをローカルで上書き
+          // ただしroadmapHtmlはSupabase側を保持（localStorageでは除外されるため）
+          var sbRoadmapHtml = _allStudents[_csIdx].roadmapHtml;
+          Object.assign(_allStudents[_csIdx], currentStudent);
+          if (!_allStudents[_csIdx].roadmapHtml && sbRoadmapHtml) {
+            _allStudents[_csIdx].roadmapHtml = sbRoadmapHtml;
+            currentStudent.roadmapHtml = sbRoadmapHtml;
+          }
+        }
       }
     }
     // ★ Supabase成功時、localStorageも最新に更新
@@ -3651,7 +3667,8 @@ function _rowToStudent(row) {
     monthlyScores: _parseJsonCol(row.monthly_scores, {}),
     monthlyTestData: _parseJsonCol(row.monthly_test_data, null),
     roadmapHtml: row.roadmap_html || null,
-    timelineData: row.timeline_data || null,  
+    timelineData: _parseJsonCol(row.timeline_data, null),
+    updated_at: row.updated_at || null,
   };
 }
 
@@ -3692,17 +3709,31 @@ function _studentToRow(s) {
   return row;
 }
 
-async function saveStudentToList(s) {
+var _saveInProgress = false;  // 保存の競合防止ロック
+
+async function saveStudentToList(s, _silent) {
+  // ★ 競合防止: 別の保存が進行中ならスキップ
+  if (_saveInProgress) { console.log('[SAVE] スキップ（別の保存が進行中）'); return; }
+  _saveInProgress = true;
+  try {
+    await _saveStudentToListInner(s, _silent);
+  } finally {
+    _saveInProgress = false;
+  }
+}
+
+async function _saveStudentToListInner(s, _silent) {
   // ① ローカルを即時更新してUIを描画
   const existingIdx = _allStudents.findIndex(x => x.name === s.name);
   if (existingIdx >= 0) {
     const prev = _allStudents[existingIdx];
     _allStudents[existingIdx] = Object.assign({}, s, {
       _id: prev._id,
-      roadmapCount: (prev.roadmapCount || 0) + 1
+      // ★ roadmapCountは既存値を維持（インクリメントしない）
+      roadmapCount: prev.roadmapCount || s.roadmapCount || 0
     });
   } else {
-    _allStudents.push(Object.assign({}, s, { roadmapCount: 1 }));
+    _allStudents.push(Object.assign({}, s, { roadmapCount: s.roadmapCount || 1 }));
   }
   // ★ localStorageに即時保存（Supabase失敗時もデータを保持）
   _saveStudentsToLocalStorage();
@@ -3716,7 +3747,7 @@ async function saveStudentToList(s) {
     console.log('[DEBUG] saveStudentToList called for:', s.name);
     const existingLocal = existingIdx >= 0 ? _allStudents[existingIdx] : null;
     const row = _studentToRow(Object.assign({}, s, {
-      roadmapCount: existingLocal ? existingLocal.roadmapCount : 1
+      roadmapCount: existingLocal ? existingLocal.roadmapCount : (s.roadmapCount || 1)
     }));
 
     if (existingLocal && existingLocal._id) {
@@ -3734,7 +3765,7 @@ async function saveStudentToList(s) {
     }
     _supabaseConnected = true;
     _hideSupabaseError();
-    showToast(s.name + ' を保存しました ✓');
+    if (!_silent) showToast(s.name + ' を保存しました ✓');
   } catch(e) {
     console.error('[DEBUG] saveStudentToList error:', e);
     // 接続タイムアウト/502/503のみ切断扱い（400系スキーマエラーは切断ではない）
@@ -3742,7 +3773,7 @@ async function saveStudentToList(s) {
       _supabaseConnected = false;
       _showSupabaseError('保存エラー: ' + e.message + '　— データはブラウザに保存済みです。Supabaseの状態を確認してください。');
     }
-    showToast(s.name + ' を保存しました（ローカル）');
+    if (!_silent) showToast(s.name + ' を保存しました（ローカル）');
   }
 }
 
@@ -4323,7 +4354,7 @@ setInterval(function() {
     return (x._id && currentStudent._id && x._id === currentStudent._id) || x.name === currentStudent.name;
   });
   if (idx >= 0) Object.assign(_allStudents[idx], currentStudent);
-  saveStudentToList(currentStudent).then(function() {
+  saveStudentToList(currentStudent, true).then(function() {
     console.log('[AUTOSYNC] Supabase自動同期成功:', currentStudent.name);
   }).catch(function(e) {
     console.warn('[AUTOSYNC] Supabase自動同期失敗:', e.message);
@@ -4393,12 +4424,23 @@ function _cacheRestoreStudent(s) {
   _restoreAdviceFromCache(_advData);
   // currentStudentのデータを復元（DB未保存の編集も含む）
   if (cache._studentData) {
+    // ★ roadmapHtmlはcache._studentDataに含まれない場合があるため、既存値を保護
+    var _prevRoadmapHtml = currentStudent.roadmapHtml;
     Object.assign(currentStudent, cache._studentData);
-    // _allStudentsの該当エントリも更新
+    if (!currentStudent.roadmapHtml && _prevRoadmapHtml) {
+      currentStudent.roadmapHtml = _prevRoadmapHtml;
+    }
+    // _allStudentsの該当エントリも更新（roadmapHtmlを保護）
     var _idx = _allStudents.findIndex(function(x) {
       return (x._id && currentStudent._id && x._id === currentStudent._id) || x.name === currentStudent.name;
     });
-    if (_idx >= 0) Object.assign(_allStudents[_idx], cache._studentData);
+    if (_idx >= 0) {
+      var _prevRmHtml = _allStudents[_idx].roadmapHtml;
+      Object.assign(_allStudents[_idx], cache._studentData);
+      if (!_allStudents[_idx].roadmapHtml && _prevRmHtml) {
+        _allStudents[_idx].roadmapHtml = _prevRmHtml;
+      }
+    }
   }
   // DOM HTMLが無い場合はSupabaseのroadmapHtmlかフル再描画
   if (!restored) {
@@ -4779,6 +4821,9 @@ async function generateRoadmap() {
           _newStudentObj.roadmapHtml = _rmC.innerHTML;
         }
       }
+      // ★ ロードマップ生成時のみroadmapCountをインクリメント
+      var _existingForCount = _allStudents.find(function(x) { return x.name === _newStudentObj.name; });
+      _newStudentObj.roadmapCount = (_existingForCount ? (_existingForCount.roadmapCount || 0) : 0) + 1;
       await saveStudentToList(_newStudentObj);
       // Supabase保存後に_idをcurrentStudentにも反映
       var saved = _allStudents.find(function(x) { return x.name === _newStudentObj.name; });
