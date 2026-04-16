@@ -3369,6 +3369,19 @@ async function _sbRestPost(table, row) {
     if (res.status === 503 || res.status === 502) {
       throw new Error('Supabaseプロジェクト停止中（HTTP ' + res.status + '）');
     }
+    if (res.status === 400) {
+      var body = await res.text();
+      // ★ カラム不足エラー（PGRST204）の場合、該当カラムを除外してリトライ
+      var colMatch = body.match(/Could not find the '(\w+)' column/);
+      if (colMatch) {
+        console.warn('[DB] カラム不足:', colMatch[1], '- 除外してリトライ');
+        if (!_sbMissingCols) _sbMissingCols = {};
+        _sbMissingCols[colMatch[1]] = true;
+        delete row[colMatch[1]];
+        return await _sbRestPost(table, row);
+      }
+      throw new Error('REST POST error: ' + res.status + ' ' + body);
+    }
     if (!res.ok) throw new Error('REST POST error: ' + res.status + ' ' + await res.text());
     return await res.json();
   } catch(e) {
@@ -3392,6 +3405,19 @@ async function _sbRestPatch(table, id, row) {
     if (res.status === 503 || res.status === 502) {
       throw new Error('Supabaseプロジェクト停止中（HTTP ' + res.status + '）');
     }
+    if (res.status === 400) {
+      var body = await res.text();
+      // ★ カラム不足エラー（PGRST204）の場合、該当カラムを除外してリトライ
+      var colMatch = body.match(/Could not find the '(\w+)' column/);
+      if (colMatch) {
+        console.warn('[DB] カラム不足:', colMatch[1], '- 除外してリトライ');
+        if (!_sbMissingCols) _sbMissingCols = {};
+        _sbMissingCols[colMatch[1]] = true;
+        delete row[colMatch[1]];
+        return await _sbRestPatch(table, id, row);
+      }
+      throw new Error('REST PATCH error: ' + res.status + ' ' + body);
+    }
     if (!res.ok) throw new Error('REST PATCH error: ' + res.status);
     return await res.json();
   } catch(e) {
@@ -3413,6 +3439,7 @@ async function _sbRestDelete(table, id) {
 
 // ===== Supabase接続状態管理 =====
 var _supabaseConnected = false;
+var _sbMissingCols = {};  // テーブルに存在しないカラムを記録（リトライ時にスキップ）
 
 function _showSupabaseError(msg) {
   var banner = document.getElementById('supabase-error-banner');
@@ -3658,6 +3685,10 @@ function _studentToRow(s) {
     timeline_data: s.timelineData || null,
     updated_at: new Date().toISOString(),
   };
+  // ★ 過去にエラーになったカラムを事前除外（リトライ回数を減らす）
+  if (_sbMissingCols) {
+    Object.keys(_sbMissingCols).forEach(function(col) { delete row[col]; });
+  }
   return row;
 }
 
@@ -3694,14 +3725,23 @@ async function saveStudentToList(s) {
     } else {
       const result = await _sbRestPost('students', row);
       const idx2 = _allStudents.findIndex(x => x.name === s.name);
-      if (idx2 >= 0 && result && result[0]) _allStudents[idx2]._id = result[0].id;
+      if (idx2 >= 0 && result && result[0]) {
+        _allStudents[idx2]._id = result[0].id;
+        // ★ _id取得後にlocalStorageも更新
+        _saveStudentsToLocalStorage();
+      }
       console.log('[DEBUG] Inserted student:', s.name, 'id:', result && result[0] && result[0].id);
     }
+    _supabaseConnected = true;
+    _hideSupabaseError();
     showToast(s.name + ' を保存しました ✓');
   } catch(e) {
     console.error('[DEBUG] saveStudentToList error:', e);
-    _supabaseConnected = false;
-    _showSupabaseError('保存エラー: ' + e.message + '　— データはブラウザに保存済みです。Supabaseの状態を確認してください。');
+    // 接続タイムアウト/502/503のみ切断扱い（400系スキーマエラーは切断ではない）
+    if (e.message.indexOf('停止中') >= 0 || e.message.indexOf('タイムアウト') >= 0) {
+      _supabaseConnected = false;
+      _showSupabaseError('保存エラー: ' + e.message + '　— データはブラウザに保存済みです。Supabaseの状態を確認してください。');
+    }
     showToast(s.name + ' を保存しました（ローカル）');
   }
 }
