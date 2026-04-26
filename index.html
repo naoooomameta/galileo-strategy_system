@@ -8018,10 +8018,53 @@ async function generateAdvice() {
   const gap = s.univInfo.dev - s.devVal;
   const tgtDev = s.univInfo.dev || 65;
 
-  // 生徒の登録科目を全て使用
-  var registeredSubs = (s.mainSubjects && s.mainSubjects.length > 0)
-    ? s.mainSubjects
-    : (s.univInfo && s.univInfo.subjects ? s.univInfo.subjects : ['英語R','数学1A','現代文']);
+  // 参考書ルートに表示される科目を抽出（受験科目から、参考書がある科目だけ）
+  // 重点アドバイスは参考書ルートの科目と完全に一致させる
+  var subjectsForAdvice = [];
+
+  if (s.univInfo && s.univInfo.subjects && s.univInfo.subjects.length > 0) {
+    // 参考書ルートと同じロジックで「実際に参考書がある科目」を抽出
+    var subjectToSubKey = {
+      '英語':'eng','英語R':'eng','英語L':'eng',
+      '英語リーディング':'eng','英語リスニング':'eng',
+      '数学':'math','数学1A':'math','数学2BC':'math',
+      '国語':'jpn','現代文':'jpn','古文':'jpn','漢文':'jpn',
+      '理科':'sci','理科2科目':'sci','物理':'sci','化学':'sci','生物':'sci','地学':'sci','理科基礎':'sci',
+      '社会':'soc','社会2科目':'soc','日本史':'soc','世界史':'soc','地理':'soc','公民':'soc',
+      '小論文':'jpn','総合教養':'eng','実技':'etc','情報':'etc'
+    };
+    var maxLvCheck = Math.min(5, (s.levelVal || 2) + 2);
+
+    // 受験科目で参考書があるものだけ採用
+    s.univInfo.subjects.forEach(function(subName){
+      var subKey = subjectToSubKey[subName];
+      if (!subKey) return;
+      var hasBook = (typeof ALL_TEXTBOOKS !== 'undefined') && ALL_TEXTBOOKS.some(function(b){
+        return b.sub === subKey
+          && (b.stream === 'both' || b.stream === s.stream)
+          && b.level >= 1 && b.level <= maxLvCheck;
+      });
+      if (hasBook && subjectsForAdvice.indexOf(subName) === -1) {
+        subjectsForAdvice.push(subName);
+      }
+    });
+  }
+
+  // mainSubjects があれば優先（受験科目に含まれるものだけ）
+  if (s.mainSubjects && s.mainSubjects.length > 0) {
+    s.mainSubjects.forEach(function(subName){
+      if (subjectsForAdvice.indexOf(subName) === -1) {
+        subjectsForAdvice.push(subName);
+      }
+    });
+  }
+
+  // フォールバック
+  if (subjectsForAdvice.length === 0) {
+    subjectsForAdvice = ['英語R','数学1A','現代文'];
+  }
+
+  var registeredSubs = subjectsForAdvice;
 
   const subjects = registeredSubs.map(function(subName) {
     var curDev = (s.subDevs && s.subDevs[subName]) ? s.subDevs[subName] : s.devVal;
@@ -8045,11 +8088,16 @@ async function generateAdvice() {
 - 科目別状況：
 ${subjectStr}
 
+⚠️ 重要：「科目別状況」に記載された ${subjects.length} 個の科目すべてに対して、必ず1個ずつアドバイスを生成してください。省略・統合は禁止。subjectsの配列は必ず ${subjects.length} 個の要素を含めてください。
+
+科目名は以下を厳密に使用してください（一字一句変更しない）：
+${subjects.map(function(sub){ return '- ' + sub.name; }).join('\n')}
+
 以下の形式でJSONのみ出力してください（他のテキスト不要）：
 {
   "summary": "150〜200字の総合戦略コメント（塾長として生徒に語りかける口調で。学部の特性・入試傾向も踏まえ、現状の課題と合格への具体的な道筋を示す）",
   "subjects": [
-    { "name": "科目名", "advice": "50〜70字の具体的アドバイス", "priority": "high/medium/low" }
+${subjects.map(function(sub){ return '    { "name": "' + sub.name + '", "advice": "50〜70字の具体的アドバイス", "priority": "high/medium/low" }'; }).join(',\n')}
   ],
   "tasks": [
     "今月最優先でやるべきタスク①（具体的な参考書名や学習量を含める）",
@@ -8076,10 +8124,42 @@ ${subjectStr}
 function renderAdvice(parsed, subjects) {
   document.getElementById('advice-summary').textContent = parsed.summary;
 
+  // ── 登録科目すべてが表示されるようマージ ──
+  // Geminiが返した科目アドバイスをマップ化
+  var geminiSubjectMap = {};
+  (parsed.subjects || []).forEach(function(sub) {
+    if (sub && sub.name) geminiSubjectMap[sub.name] = sub;
+  });
+
+  // 登録科目すべてをループし、Gemini結果がなければfallbackから補完
+  var fallbackData = generateFallbackAdvice(currentStudent, subjects, currentStudent.univInfo.dev - currentStudent.devVal);
+  var fallbackMap = {};
+  (fallbackData.subjects || []).forEach(function(sub) {
+    if (sub && sub.name) fallbackMap[sub.name] = sub;
+  });
+
+  // 表示順は登録科目の順序を保持
+  var mergedSubjects = subjects.map(function(reg) {
+    if (geminiSubjectMap[reg.name]) {
+      return geminiSubjectMap[reg.name];
+    } else if (fallbackMap[reg.name]) {
+      return fallbackMap[reg.name];
+    } else {
+      // fallbackにもない場合の最終手段
+      var g = reg.target - reg.current;
+      var priority = g >= 8 ? 'high' : (g >= 4 ? 'medium' : 'low');
+      return {
+        name: reg.name,
+        advice: '現状偏差値' + reg.current + '、目標' + reg.target + '。ギャップ' + g + 'ポイントを意識した学習を継続してください。',
+        priority: priority
+      };
+    }
+  });
+
   const priorityColor = { high: 'var(--accent)', medium: 'var(--gold)', low: 'var(--teal)' };
   const priorityLabel = { high: '要強化', medium: '維持・向上', low: '良好' };
   let subHtml = '';
-  (parsed.subjects || []).forEach(sub => {
+  mergedSubjects.forEach(sub => {
     const col = priorityColor[sub.priority] || 'var(--text-muted)';
     const lbl = priorityLabel[sub.priority] || '';
     subHtml += `<div style="background:var(--paper);border:1.5px solid var(--border);border-radius:10px;padding:12px;">
