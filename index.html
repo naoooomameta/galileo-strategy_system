@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ガリレオ 戦略管理システム v1.2</title>
+<title>ガリレオ 戦略管理システム v1.2.1</title>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@400;600;700&family=Noto+Sans+JP:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.3/dist/umd/supabase.min.js"></script>
@@ -1011,7 +1011,7 @@
   .gr-g-track .gl { position:absolute; top:0; bottom:0; border-left:1px solid #f0ebde; }
   .gr-g-bar { position:absolute; top:5px; height:18px; border-radius:5px; color:#fff; font-size:10.5px; line-height:18px; padding:0 6px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; box-shadow:0 1px 2px rgba(0,0,0,.12); }
   .gr-g-bar.stage { color:var(--ink); font-weight:700; border:1px solid rgba(0,0,0,.06); box-shadow:none; }
-  .gr-g-ev { position:absolute; top:4px; transform:translateX(-50%); background:var(--accent); color:#fff; border-radius:9px; padding:0 7px; font-size:10.5px; line-height:19px; white-space:nowrap; }
+  .gr-g-ev { position:absolute; top:4px; transform:translateX(-50%); background:var(--accent); color:#fff; border-radius:9px; padding:0 7px; font-size:10.5px; line-height:19px; white-space:nowrap; box-sizing:border-box; overflow:hidden; text-overflow:ellipsis; }
   .gr-g-today { position:absolute; top:0; bottom:0; width:2px; background:#c84b31; opacity:.65; z-index:2; }
   .gr-g-group { background:#f7f4ec; font-weight:700; color:var(--ink); padding:4px 8px; font-size:11.5px; border-bottom:1px solid #eee8da; display:flex; align-items:center; gap:6px; }
 
@@ -1130,7 +1130,7 @@
       </div>
       <div>
         <div class="logo-text">ガリレオ 理系大学受験 戦略管理システム</div>
-        <span class="logo-sub">GALILEO SCIENCE EXAM STRATEGY — v1.2</span>
+        <span class="logo-sub">GALILEO SCIENCE EXAM STRATEGY — v1.2.1</span>
       </div>
     </div>
   </div>
@@ -11875,12 +11875,14 @@ function ssEnter(){
 
 <script>
 /* ============================================================
- * 個別合格ロードマップ（GR）モジュール — 戦略管理システム v1.2
+ * 個別合格ロードマップ（GR）モジュール — 戦略管理システム v1.2.1
  * 「GALILEO｜個別合格ロードマップ システム開発構想書」のMVPを実装。
  *   ・「合格ロードマップ」タブ：合格戦略／教材・年間計画／月間ロードマップ／到達度
  *   ・「週間・毎日課題」タブ：週間学習計画／毎日の課題・採点／復習キュー
  * 生徒ごとに1つの計画データ（plan）を持ち、すべての画面を同じデータから描画する。
  * 保存先：この端末（localStorage）＋ Supabase の roadmap_plans テーブル（作成後に自動で有効）。
+ * 同時編集：クラウドへは「読み込んだ版のままなら書き込む」条件付きで保存し、他の画面で先に保存されていた
+ *           場合は、項目（課題・教材・復習などのID）単位で双方の変更をまとめてから保存する（v1.2.1）。
  * グローバルに公開するのは window.GR のみ（既存コードとの名前衝突を避けるため）。
  * ============================================================ */
 (function () {
@@ -11987,8 +11989,11 @@ function ssEnter(){
     tab: { groad: 'strategy', gweek: 'weekly' },
     week: null, day: null, month: null, sumMonth: null,
     gradeTaskId: null, reviewFilter: 'open', matFilter: '',
-    cloud: 'local', cloudMsg: '',
+    cloud: 'local', cloudMsg: '', cloudNote: '', cloudNoteAt: 0,
     saveTimer: null, cloudTimer: null, retryTimer: null, pendingCloud: false, loadSeq: 0,
+    // baseJson/baseAt：この画面の計画のもとになっている「クラウド上の版」（同時編集のマージに使う）
+    baseJson: null, baseAt: null, busy: false, pushQueued: false, conflicts: 0, lastCheck: 0, lastSent: null,
+    renderPending: false, keepForm: false, pointerAt: 0,
     lsFailed: false
   };
   try { var _ui = JSON.parse(localStorage.getItem(LS_UI) || 'null'); if (_ui && _ui.tab) { S.tab.groad = _ui.tab.groad || S.tab.groad; S.tab.gweek = _ui.tab.gweek || S.tab.gweek; } } catch (e) { }
@@ -12047,8 +12052,10 @@ function ssEnter(){
     opts = opts || {}; opts.signal = ctl.signal;
     return fetch(url, opts).then(function (r) { clearTimeout(t); return r; }, function (e) { clearTimeout(t); throw e; });
   }
-  function cloudGet(key) {
-    var url = SUPABASE_URL + '/rest/v1/' + TABLE + '?student_id=eq.' + encodeURIComponent(key) + '&select=plan,updated_at';
+  function sameTime(a, b) { if (!a || !b) return false; var x = Date.parse(a), y = Date.parse(b); return isFinite(x) && x === y; }
+  // metaOnly：更新日時だけを取る（他の画面で保存されたかの確認用。軽い）
+  function cloudGet(key, metaOnly) {
+    var url = SUPABASE_URL + '/rest/v1/' + TABLE + '?student_id=eq.' + encodeURIComponent(key) + '&select=' + (metaOnly ? 'updated_at' : 'plan,updated_at');
     return fetchT(url, { headers: sbHeaders() }).then(function (res) {
       if (res.ok) return res.json().then(function (arr) { return { row: (arr && arr[0]) || null }; });
       return res.text().then(function (txt) {
@@ -12057,25 +12064,60 @@ function ssEnter(){
       });
     });
   }
-  function cloudPut(key, plan) {
-    var url = SUPABASE_URL + '/rest/v1/' + TABLE + '?on_conflict=student_id';
-    var body = JSON.stringify({ student_id: key, plan: plan, updated_at: plan.updatedAt || nowIso() });
-    return fetchT(url, { method: 'POST', headers: sbHeaders({ 'Prefer': 'resolution=merge-duplicates,return=minimal' }), body: body }, 20000).then(function (res) {
-      if (res.ok) return { ok: true };
+  // 条件付きの書き込み。クラウドの版が baseAt（この画面が読み込んだ版）のままのときだけ上書きする。
+  // まだ行が無いとき（baseAt なし）は新規作成だけを行う（既にあれば何もしない）。書けなかったら conflict を返す。
+  function cloudWrite(key, json, at, baseAt, keepalive) {
+    var url, body, prefer;
+    if (baseAt) {
+      url = SUPABASE_URL + '/rest/v1/' + TABLE + '?student_id=eq.' + encodeURIComponent(key) + '&updated_at=eq.' + encodeURIComponent(baseAt) + '&select=updated_at';
+      body = '{"plan":' + json + ',"updated_at":' + JSON.stringify(at) + '}';
+      prefer = 'return=representation';
+    } else {
+      url = SUPABASE_URL + '/rest/v1/' + TABLE + '?on_conflict=student_id&select=updated_at';
+      body = '{"student_id":' + JSON.stringify(key) + ',"plan":' + json + ',"updated_at":' + JSON.stringify(at) + '}';
+      prefer = 'resolution=ignore-duplicates,return=representation';
+    }
+    var opts = { method: baseAt ? 'PATCH' : 'POST', headers: sbHeaders({ 'Prefer': prefer }), body: body };
+    if (keepalive && body.length < 60000) opts.keepalive = true;
+    return fetchT(url, opts, 20000).then(function (res) {
+      if (res.ok) return res.text().then(function (txt) {
+        var arr = null; try { arr = txt ? JSON.parse(txt) : []; } catch (e) { arr = null; }
+        return (Array.isArray(arr) && arr.length) ? { ok: true } : { conflict: true };
+      });
       return res.text().then(function (txt) {
         if (isMissingTable(res.status, txt)) return { missing: true };
+        if (res.status === 409) return { conflict: true };
         throw new Error('HTTP ' + res.status + (txt ? '：' + txt.slice(0, 120) : ''));
       });
     });
   }
 
-  /* ---------- 読み込み・保存 ---------- */
+  /* ---------- 読み込み・保存 ----------
+   * ・端末（localStorage）へは変更のたびに保存し、クラウドへは少し待ってまとめて保存する。
+   * ・クラウドへの保存は条件付き。他の画面で先に保存されていたら、その版を取り寄せて
+   *   「この画面の変更」と「他の画面の変更」を項目単位でまとめてから保存し直す（mergePlans）。
+   * ・画面を開いた時・タブに戻った時・30秒ごとに、他の画面の保存を確認して取り込む。
+   * ・入力欄に文字を打っている間・クリックの途中は画面を描き直さない（データは取り込み、表示は入力欄から離れた時に更新）。 */
+  function isTyping() {
+    var ae = document.activeElement;
+    return !!(ae && ae.closest && ae.closest('.gr-root') && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName)
+      && ae.type !== 'checkbox' && ae.type !== 'radio' && !(ae.classList && ae.classList.contains('gr-student-sel')));
+  }
+  function setCloudNote(msg) { S.cloudNote = msg; S.cloudNoteAt = Date.now(); setTimeout(renderStatus, 15500); }
+  function pointerBusy() { return S.pointerAt && Date.now() - S.pointerAt < 3000; }
+  // 他の画面の変更を取り込んだ後の再描画（入力中・クリック中は待つ。採点欄の書きかけは残す）
+  function refreshView() {
+    if (isTyping() || pointerBusy()) { S.renderPending = true; return; }
+    S.renderPending = false; S.keepForm = true;
+    try { rerender(); } finally { S.keepForm = false; }
+  }
   function ensureLoaded() {
     var st = getCurrentStudent();
     var key = studentKey(st);
     if (key && key === S.sid) { S.student = st; return; }
     if (S.sid && S.plan) flush();
     S.sid = key; S.student = st; S.plan = null; S.gradeTaskId = null; S.pendingCloud = false;
+    S.baseJson = null; S.baseAt = null; S.conflicts = 0; S.renderPending = false; S.pushQueued = false; S.cloudNote = ''; S.busy = false;
     clearTimeout(S.cloudTimer); clearTimeout(S.retryTimer);
     if (!st) { S.cloud = 'local'; return; }
     var local = lsGet(key);
@@ -12086,23 +12128,65 @@ function ssEnter(){
     }
     S.plan = local ? migrate(local) : null;
     if (!cloudFor(st)) { S.cloud = 'local'; return; }
+    var meta = metaGet()[key] || {};
+    // unsynced：端末の計画に、まだクラウドへ保存できていない変更がある
+    var unsynced = !!(S.plan && !(S.plan.updatedAt && sameTime(meta.s, S.plan.updatedAt)));
+    var loadedJson = S.plan ? JSON.stringify(S.plan) : null;
+    if (S.plan && !unsynced) { S.baseJson = loadedJson; S.baseAt = meta.s; }
+    else if (S.plan && meta.s) S.baseAt = meta.s;
     S.cloud = 'syncing';
-    var seq = ++S.loadSeq;
+    var seq = ++S.loadSeq, tok = {};
+    S.busy = tok; S.lastCheck = Date.now();
     cloudGet(key).then(function (r) {
       if (seq !== S.loadSeq || S.sid !== key) return;
-      if (r.missing) { S.cloud = 'missing'; renderStatus(); return; }
-      var row = r.row, cp = row && row.plan;
-      var cAt = (cp && cp.updatedAt) || '', lAt = (S.plan && S.plan.updatedAt) || '';
-      if (cp && (!S.plan || cAt > lAt)) {
-        S.plan = migrate(cp); lsSet(key, S.plan); markSynced(key, S.plan.updatedAt || '');
-        S.cloud = 'ok'; render();
-      } else if (S.plan && (!cp || lAt > cAt)) {
-        S.pendingCloud = true; pushCloud();
-      } else { S.cloud = 'ok'; if (S.plan) markSynced(key, lAt); renderStatus(); }
+      if (r.missing) { S.cloud = 'missing'; return; }
+      var row = r.row;
+      if (!row || !row.plan) {
+        // クラウドにまだ無い → 端末の計画があればアップロードする
+        S.baseJson = null; S.baseAt = null;
+        if (S.plan) S.pendingCloud = true; else S.cloud = 'ok';
+        return;
+      }
+      var remote = migrate(row.plan), rj = JSON.stringify(remote);
+      if (!S.plan || (S.plan.createdAt && remote.createdAt && S.plan.createdAt !== remote.createdAt)) { adoptRemote(remote, rj, row.updated_at, ''); return; }
+      if (!unsynced && !S.pendingCloud) { adoptRemote(remote, rj, row.updated_at, ''); return; }
+      // 端末に未保存の変更がある → クラウドの版とまとめる
+      var base = !unsynced ? JSON.parse(loadedJson) : (sameTime(row.updated_at, meta.s) ? remote : null);
+      applyMerge(base, remote, rj, row.updated_at);
     }).catch(function (e) {
       if (seq !== S.loadSeq) return;
-      S.cloud = 'error'; S.cloudMsg = e.message || String(e); renderStatus();
+      S.cloud = 'error'; S.cloudMsg = e.message || String(e);
+      if (S.plan && unsynced) S.pendingCloud = true;
+      clearTimeout(S.retryTimer); S.retryTimer = setTimeout(function () { if (S.cloud === 'error' && S.sid === key) { saveLocalNow(); S.sid = null; ensureLoaded(); refreshView(); } }, 30000);
+    }).then(function () {
+      if (S.busy === tok) S.busy = false;
+      if (seq !== S.loadSeq) return;
+      afterBusy(); renderStatus();
     });
+  }
+  // クラウドの版をそのまま使う
+  function adoptRemote(remote, rj, at, note) {
+    var changed = !S.plan || !contentEq(S.plan, remote);
+    S.plan = remote; S.baseJson = rj; S.baseAt = at; S.pendingCloud = false;
+    lsSet(S.sid, remote); markSynced(S.sid, remote.updatedAt || '');
+    S.cloud = 'ok'; S.cloudMsg = '';
+    if (changed) { if (note) setCloudNote(note); refreshView(); }
+  }
+  // この画面の計画（S.plan）とクラウドの版をまとめる。base は両者の共通の元の版（不明なら null）
+  function applyMerge(base, remote, rj, at) {
+    var before = planSig(S.plan);
+    var merged = mergePlans(base, S.plan, remote);
+    S.plan = merged; normalizePlan(merged);
+    S.baseJson = rj; S.baseAt = at;
+    var after = planSig(merged);
+    if (after === planSig(remote)) {
+      // この画面の変更はすでにクラウドの版に含まれていた
+      S.plan = remote; S.pendingCloud = false; lsSet(S.sid, remote); markSynced(S.sid, remote.updatedAt || ''); S.cloud = 'ok';
+    } else {
+      merged.updatedAt = nowIso(); merged.updatedBy = userEmail();
+      S.pendingCloud = true; S.pushQueued = true; saveLocalNow();
+    }
+    if (after !== before) { setCloudNote('他の画面の変更を取り込みました'); refreshView(); }
   }
 
   // データを変更したら必ず呼ぶ：端末へは即時、クラウドへは少し待ってまとめて保存
@@ -12113,7 +12197,7 @@ function ssEnter(){
     clearTimeout(S.saveTimer);
     S.saveTimer = setTimeout(saveLocalNow, 250);
     if (cloudFor(S.student) && S.cloud !== 'missing') {
-      S.pendingCloud = true; S.cloud = 'syncing';
+      S.pendingCloud = true; if (S.cloud !== 'error') S.cloud = 'syncing';
       clearTimeout(S.cloudTimer); S.cloudTimer = setTimeout(pushCloud, 1500);
     }
     renderStatus();
@@ -12125,24 +12209,216 @@ function ssEnter(){
       if (!ok && !cloudFor(S.student)) toast('端末の保存容量が不足しています。クラウド保存を設定してください');
     }
   }
-  function pushCloud() {
+  function afterBusy() {
+    var quick = S.pushQueued; S.pushQueued = false;
+    if (!S.pendingCloud || S.cloud === 'missing' || S.cloud === 'error') return;
+    clearTimeout(S.cloudTimer); S.cloudTimer = setTimeout(pushCloud, quick ? 250 : 1500);
+  }
+  function pushCloud(opt) {
     clearTimeout(S.cloudTimer);
-    if (!S.pendingCloud || !S.plan || !cloudFor(S.student)) return Promise.resolve();
-    var key = S.sid, plan = S.plan, at = plan.updatedAt;
-    S.pendingCloud = false; S.cloud = 'syncing'; renderStatus();
-    return cloudPut(key, plan).then(function (r) {
+    if (!S.pendingCloud || !S.plan || !S.sid || !cloudFor(S.student) || S.cloud === 'missing') return Promise.resolve();
+    if (S.busy) { S.pushQueued = true; return Promise.resolve(); }
+    var key = S.sid, tok = {}, plan = S.plan;
+    if (!plan.updatedAt) plan.updatedAt = nowIso();
+    var json = JSON.stringify(plan), at = plan.updatedAt, baseAt = S.baseAt;
+    S.pendingCloud = false; S.busy = tok; S.cloud = 'syncing'; renderStatus();
+    S.lastSent = { key: key, at: at, json: json };
+    return cloudWrite(key, json, at, baseAt, opt && opt.keepalive).then(function (r) {
+      if (r.ok) { onPushed(key, json, at); return; }
       if (S.sid !== key) return;
-      if (r.missing) { S.cloud = 'missing'; }
-      else { S.cloud = S.pendingCloud ? 'syncing' : 'ok'; markSynced(key, at); }
-      renderStatus();
+      S.pendingCloud = true;
+      if (r.missing) { S.cloud = 'missing'; return; }
+      return resolveConflict(key);
     }).catch(function (e) {
       if (S.sid !== key) return;
       S.cloud = 'error'; S.cloudMsg = e.message || String(e); S.pendingCloud = true;
-      clearTimeout(S.retryTimer); S.retryTimer = setTimeout(pushCloud, 30000);
+      clearTimeout(S.retryTimer); S.retryTimer = setTimeout(function () { if (S.cloud === 'error') S.cloud = 'syncing'; pushCloud(); }, 30000);
+    }).then(function () {
+      if (S.busy === tok) S.busy = false;
       renderStatus();
+      if (S.sid === key) afterBusy();
     });
   }
-  function flush() { saveLocalNow(); if (S.pendingCloud) pushCloud(); }
+  function onPushed(key, json, at) {
+    markSynced(key, at);
+    if (S.sid !== key) return;
+    S.baseJson = json; S.baseAt = at; S.conflicts = 0; S.cloudMsg = '';
+    S.cloud = S.pendingCloud ? 'syncing' : 'ok';
+  }
+  // 条件付き書き込みが通らなかった＝他の画面で先に保存されていた → 取り寄せてまとめる
+  function resolveConflict(key) {
+    S.conflicts++;
+    if (S.conflicts > 5) {
+      S.cloud = 'error'; S.cloudMsg = '他の画面の保存と重なっています（自動で再試行します）';
+      clearTimeout(S.retryTimer); S.retryTimer = setTimeout(function () { S.conflicts = 0; if (S.cloud === 'error') S.cloud = 'syncing'; pushCloud(); }, 20000);
+      return;
+    }
+    return cloudGet(key).then(function (r) {
+      if (S.sid !== key) return;
+      if (r.missing) { S.cloud = 'missing'; return; }
+      var row = r.row, ls = S.lastSent;
+      if (!row || !row.plan) { S.baseJson = null; S.baseAt = null; S.pushQueued = true; return; }
+      if (ls && ls.key === key && sameTime(row.updated_at, ls.at)) {
+        // 実際には自分の書き込みが保存されていた（応答だけが届かなかった）
+        markSynced(key, ls.at); S.baseJson = ls.json; S.baseAt = row.updated_at; S.conflicts = 0;
+        S.pendingCloud = !sameTime(S.plan.updatedAt, ls.at); S.cloud = S.pendingCloud ? 'syncing' : 'ok';
+        return;
+      }
+      var remote = migrate(row.plan), rj = JSON.stringify(remote);
+      if (S.plan.createdAt && remote.createdAt && S.plan.createdAt !== remote.createdAt) {
+        adoptRemote(remote, rj, row.updated_at, '');
+        toast('この生徒のロードマップは別の画面で先に作成されていたため、そちらを表示します');
+        return;
+      }
+      applyMerge(S.baseJson ? JSON.parse(S.baseJson) : null, remote, rj, row.updated_at);
+    });
+  }
+  // 他の画面での保存を確認して取り込む（画面を開いた時・タブに戻った時・定期的に）
+  function checkRemote(force) {
+    if (!S.plan || !S.sid || !cloudFor(S.student) || S.cloud === 'missing' || S.busy || S.pendingCloud || !visiblePage()) return;
+    var now = Date.now(); if (!force && now - S.lastCheck < 10000) return;
+    S.lastCheck = now;
+    var key = S.sid, tok = {};
+    S.busy = tok;
+    cloudGet(key, true).then(function (r) {
+      if (S.sid !== key || r.missing || !r.row) return;
+      if (S.baseAt && sameTime(r.row.updated_at, S.baseAt)) return;
+      return cloudGet(key).then(function (r2) {
+        if (S.sid !== key || !r2.row || !r2.row.plan || !S.plan) return;
+        var row = r2.row, remote = migrate(row.plan), rj = JSON.stringify(remote);
+        if (!S.pendingCloud || (S.plan.createdAt && remote.createdAt && S.plan.createdAt !== remote.createdAt)) adoptRemote(remote, rj, row.updated_at, '他の画面の変更を反映しました');
+        else applyMerge(S.baseJson ? JSON.parse(S.baseJson) : null, remote, rj, row.updated_at);
+      });
+    }).catch(function () { }).then(function () {
+      if (S.busy === tok) S.busy = false;
+      if (S.sid === key) { afterBusy(); renderStatus(); }
+    });
+  }
+  // 入力欄から離れた・クリックが終わった時に、待たせていた再描画を行う
+  function resumeAfterInput() { if (S.renderPending && !isTyping() && !pointerBusy()) refreshView(); }
+  function flush(ev) { saveLocalNow(); if (S.pendingCloud) pushCloud({ keepalive: !!(ev && ev.type === 'beforeunload') }); }
+
+  /* ---------- 同時編集のマージ ----------
+   * 3つの版（共通の元 base・この画面 local・クラウド remote）を比べ、片方だけが変えた所はその変更を、
+   * 両方が変えた所は中身をさらに細かく比べてまとめる。
+   *  ・id を持つ行の配列（課題・教材・復習・段階・模試など）は id ごとに対応づける
+   *    （追加は両方とも残す／削除は相手が変えていなければ反映／片方が変更していれば残す）
+   *  ・文字列などの配列（科目・方針など）は集合として扱う
+   *  ・同じ欄を両方が書き換えた場合は、この画面（後から保存した側）の値を採る
+   * base が不明（null）のときは削除を判断できないため、両方にあるものをすべて残す。 */
+  function canonStr(v) {
+    if (v === null || typeof v !== 'object') return JSON.stringify(v === undefined ? null : v);
+    if (Array.isArray(v)) return '[' + v.map(canonStr).join(',') + ']';
+    return '{' + Object.keys(v).filter(function (k) { return v[k] !== undefined; }).sort().map(function (k) { return JSON.stringify(k) + ':' + canonStr(v[k]); }).join(',') + '}';
+  }
+  function hashStr(s) { var h = 5381; for (var i = 0; i < s.length; i++) h = ((h * 33) ^ s.charCodeAt(i)) >>> 0; return h.toString(36); }
+  // 計画の中身の比較用（保存日時・保存者は除く）
+  function planSig(p) { var o = {}; Object.keys(p || {}).forEach(function (k) { if (k !== 'updatedAt' && k !== 'updatedBy') o[k] = p[k]; }); return canonStr(o); }
+  function contentEq(a, b) { return planSig(a) === planSig(b); }
+  function mergePlans(base, local, remote) {
+    var memo = typeof WeakMap === 'function' ? new WeakMap() : null;
+    function canon(v) {
+      if (v === null || typeof v !== 'object') return JSON.stringify(v === undefined ? null : v);
+      var c = memo && memo.get(v); if (c !== undefined && c !== null) return c;
+      if (Array.isArray(v)) c = '[' + v.map(canon).join(',') + ']';
+      else c = '{' + Object.keys(v).filter(function (k) { return v[k] !== undefined; }).sort().map(function (k) { return JSON.stringify(k) + ':' + canon(v[k]); }).join(',') + '}';
+      if (memo) memo.set(v, c);
+      return c;
+    }
+    function same(a, b) { return canon(a) === canon(b); }
+    function isObj(v) { return v !== null && typeof v === 'object' && !Array.isArray(v); }
+    function has(o, k) { return isObj(o) && Object.prototype.hasOwnProperty.call(o, k) && o[k] !== undefined; }
+    function m3(b, l, r) {
+      if (same(l, r)) return l;
+      if (b !== undefined && same(l, b)) return r;
+      if (b !== undefined && same(r, b)) return l;
+      if (isObj(l) && isObj(r)) {
+        var out = {};
+        uniq(Object.keys(l).concat(Object.keys(r))).forEach(function (k) {
+          var inL = has(l, k), inR = has(r, k), inB = has(b, k);
+          if (inL && inR) out[k] = m3(inB ? b[k] : undefined, l[k], r[k]);
+          else if (inL) { if (!(inB && same(l[k], b[k]))) out[k] = l[k]; }
+          else if (inR) { if (!(inB && same(r[k], b[k]))) out[k] = r[k]; }
+        });
+        return out;
+      }
+      if (Array.isArray(l) && Array.isArray(r)) {
+        var ba = Array.isArray(b) ? b : [], all = l.concat(r, ba);
+        if (all.length && all.every(function (x) { return isObj(x) && x.id != null && x.id !== ''; })) return byId(ba, l, r);
+        return asSet(ba, l, r);
+      }
+      return l;
+    }
+    function byId(ba, l, r) {
+      var bm = {}, rm = {}, seen = {}, out = [];
+      ba.forEach(function (x) { bm[x.id] = x; });
+      r.forEach(function (x) { rm[x.id] = x; });
+      l.forEach(function (x) {
+        if (seen[x.id]) return; seen[x.id] = 1;
+        if (rm[x.id]) out.push(m3(bm[x.id], x, rm[x.id]));
+        else if (bm[x.id]) { if (!same(x, bm[x.id])) out.push(x); }   // 相手が削除：こちらが変更していなければ削除を反映
+        else out.push(x);                                             // こちらで追加
+      });
+      r.forEach(function (x) {
+        if (seen[x.id]) return; seen[x.id] = 1;
+        if (bm[x.id]) { if (!same(x, bm[x.id])) out.push(x); }       // こちらが削除：相手が変更していなければ削除を反映
+        else out.push(x);                                             // 相手が追加
+      });
+      return out;
+    }
+    function asSet(ba, l, r) {
+      var bk = {}, lk = {}, rk = {}, out = [];
+      ba.forEach(function (x) { bk[canon(x)] = 1; });
+      l.forEach(function (x) { lk[canon(x)] = 1; });
+      r.forEach(function (x) { rk[canon(x)] = 1; });
+      l.forEach(function (x) { var k = canon(x); if (bk[k] && !rk[k]) return; out.push(x); });
+      r.forEach(function (x) { var k = canon(x); if (lk[k] || bk[k]) return; out.push(x); });
+      return out;
+    }
+    return m3(base == null ? undefined : base, local, remote);
+  }
+  // マージ後の整理：同じ教材・日・種類の自動課題や、同じ日の復習課題が二重になっていたら1つにまとめる
+  function normalizePlan(p) {
+    var rank = { graded: 4, submitted: 3, resubmit: 2, missing: 1, todo: 0 }, keep = {}, drop = {}, remap = {};
+    p.tasks.forEach(function (t) {
+      if (!t.auto || !t.materialId || t.kind === 'review') return;
+      var k = t.materialId + '|' + (t.origDate || t.date) + '|' + t.kind, cur = keep[k];
+      if (!cur) { keep[k] = t; return; }
+      var a = rank[t.status] || 0, c = rank[cur.status] || 0;
+      if (a > c || (a === c && t.edited && !cur.edited)) { drop[cur.id] = 1; remap[cur.id] = t.id; keep[k] = t; }
+      else { drop[t.id] = 1; remap[t.id] = cur.id; }
+    });
+    var rkeep = {}, touched = {};
+    p.tasks.forEach(function (t) {
+      if (t.kind !== 'review' || t.status !== 'todo' || drop[t.id]) return;
+      var k = t.date + '|' + (t.subject || ''), cur = rkeep[k];
+      if (!cur) { rkeep[k] = t; return; }
+      cur.reviewIds = cur.reviewIds || [];
+      (t.reviewIds || []).forEach(function (id) { if (cur.reviewIds.indexOf(id) < 0) cur.reviewIds.push(id); });
+      drop[t.id] = 1; remap[t.id] = cur.id; touched[cur.id] = 1;
+    });
+    if (Object.keys(drop).length) p.tasks = p.tasks.filter(function (t) { return !drop[t.id]; });
+    var tids = {}, rids = {};
+    p.tasks.forEach(function (t) { tids[t.id] = t; });
+    p.reviews.forEach(function (r) { rids[r.id] = r; });
+    p.reviews.forEach(function (r) {
+      if (r.taskId && remap[r.taskId]) r.taskId = remap[r.taskId];
+      if (r.fromTaskId && remap[r.fromTaskId]) r.fromTaskId = remap[r.fromTaskId];
+      if (r.taskId && !tids[r.taskId]) r.taskId = null;
+      var rt = r.taskId && tids[r.taskId];
+      if (rt && rt.kind === 'review' && r.status !== 'done') { rt.reviewIds = rt.reviewIds || []; if (rt.reviewIds.indexOf(r.id) < 0) { rt.reviewIds.push(r.id); touched[rt.id] = 1; } }
+    });
+    p.tasks.forEach(function (t) {
+      if (t.kind !== 'review') return;
+      var n = (t.reviewIds || []).length;
+      t.reviewIds = (t.reviewIds || []).filter(function (id) { return rids[id]; });
+      if (t.status === 'todo' && (touched[t.id] || n !== t.reviewIds.length)) refreshReviewTaskIn(p, t);
+    });
+    p.tasks = p.tasks.filter(function (t) { return !(t.kind === 'review' && t.auto && t.status === 'todo' && !(t.reviewIds || []).length); });
+    p.skips = uniq(p.skips || []);
+    p.history = (p.history || []).slice().sort(function (a, b) { return String(b.at || '').localeCompare(String(a.at || '')); });
+    return p;
+  }
 
   /* ---------- 計画データの作成・補完 ---------- */
   function emptyProfile() {
@@ -12157,15 +12433,18 @@ function ssEnter(){
     Object.keys(prof).forEach(function (k) { if (p.profile[k] == null) p.profile[k] = prof[k]; });
     ['subjects', 'materials', 'stages', 'events', 'tasks', 'reviews', 'mocks', 'history', 'skips'].forEach(function (k) { if (!Array.isArray(p[k])) p[k] = []; });
     if (!p.months || typeof p.months !== 'object') p.months = {};
+    // IDのない行には内容から決まるIDを付ける（どの画面で読み込んでも同じIDになり、同時編集のマージで行を対応づけられる）
+    function fixIds(arr, prefix) { arr.forEach(function (row, i) { if (row && typeof row === 'object' && !row.id) row.id = prefix + i + '_' + hashStr(canonStr(row)); }); }
+    fixIds(p.materials, 'm'); fixIds(p.tasks, 't'); fixIds(p.reviews, 'r'); fixIds(p.stages, 'st'); fixIds(p.events, 'ev'); fixIds(p.mocks, 'mk'); fixIds(p.history, 'h');
+    ['priorities', 'weights', 'issues'].forEach(function (k) { if (Array.isArray(p.profile[k])) fixIds(p.profile[k], k.slice(0, 2)); });
     p.materials.forEach(function (m) {
-      if (!m.id) m.id = uid('m');
       if (!m.days || !m.days.length) m.days = [1, 2, 3, 4, 5];
       if (!m.pattern) m.pattern = 'straight';
       if (m.rounds == null) m.rounds = 1;
       if (!m.status) m.status = '未着手';
     });
-    p.tasks.forEach(function (t) { if (!t.id) t.id = uid('t'); if (!t.status) t.status = 'todo'; if (!t.kind) t.kind = 'other'; });
-    p.reviews.forEach(function (r) { if (!r.id) r.id = uid('r'); if (!r.status) r.status = 'open'; });
+    p.tasks.forEach(function (t) { if (!t.status) t.status = 'todo'; if (!t.kind) t.kind = 'other'; });
+    p.reviews.forEach(function (r) { if (!r.status) r.status = 'open'; });
     return p;
   }
   function examMonthOf(st) {
@@ -12181,21 +12460,28 @@ function ssEnter(){
     if (!list.length) list = st.stream === 'bunkei' ? ['英語', '数学', '国語'] : ['英語', '数学', '物理', '化学'];
     return list;
   }
+  // 学習段階を入試月から逆算して割り振る。
+  // 標準の長さ（基礎理解2・典型定着3・標準演習3・応用演習3・過去問演習3・最終調整1＝15か月）より期間が短いときは、
+  // 入試に近い段階（最終調整→過去問演習→…）から標準の長さで確保し、足りない分は前半の段階を短くするか省く。
+  // 15か月以上あるときは、比率を保ったまま全体を引き延ばす。
   function autoStages(from, to) {
     var months = monthsRange(from, to), T = months.length;
     if (!T) return [];
     var defs = [['基礎理解', 2], ['典型定着', 3], ['標準演習', 3], ['応用演習', 3], ['過去問演習', 3], ['最終調整', 1]];
-    var drop = ['標準演習', '典型定着', '応用演習', '最終調整', '基礎理解'], di = 0;
-    while (defs.length > T && di < drop.length) { var name = drop[di++]; defs = defs.filter(function (d) { return d[0] !== name; }); }
-    var W = defs.reduce(function (a, d) { return a + d[1]; }, 0);
-    var raw = defs.map(function (d) { return T * d[1] / W; });
-    var al = raw.map(function (r) { return Math.max(1, Math.floor(r)); });
-    var sum = al.reduce(function (a, b) { return a + b; }, 0);
-    var order = raw.map(function (r, i) { return [r - Math.floor(r), i]; }).sort(function (a, b) { return b[0] - a[0]; });
-    var oi = 0; while (sum < T) { al[order[oi % order.length][1]]++; sum++; oi++; }
-    while (sum > T) { var j = -1, best = 1; al.forEach(function (a, i) { if (a > best) { best = a; j = i; } }); if (j < 0) break; al[j]--; sum--; }
+    var W = defs.reduce(function (a, d) { return a + d[1]; }, 0), al;
+    if (T < W) {
+      var left = T; al = defs.map(function () { return 0; });
+      for (var i = defs.length - 1; i >= 0 && left > 0; i--) { var n = Math.min(defs[i][1], left); al[i] = n; left -= n; }
+    } else {
+      var raw = defs.map(function (d) { return T * d[1] / W; });
+      al = raw.map(function (r) { return Math.max(1, Math.floor(r)); });
+      var sum = al.reduce(function (a, b) { return a + b; }, 0);
+      var order = raw.map(function (r, j) { return [r - Math.floor(r), j]; }).sort(function (a, b) { return b[0] - a[0]; });
+      var oi = 0; while (sum < T) { al[order[oi % order.length][1]]++; sum++; oi++; }
+    }
     var out = [], k = 0;
     defs.forEach(function (d, n) {
+      if (!al[n]) return;
       out.push({ id: uid('st'), label: d[0], start: months[k], end: months[Math.min(months.length - 1, k + al[n] - 1)], color: STAGE_COLORS[n % STAGE_COLORS.length], note: '' });
       k += al[n];
     });
@@ -12225,7 +12511,7 @@ function ssEnter(){
     var prof = emptyProfile();
     prof.altUnivs = [st.univName2, st.univName3].filter(Boolean).join('・');
     prof.examSubjects = (st.univInfo && Array.isArray(st.univInfo.subjects)) ? st.univInfo.subjects.join('・') : '';
-    prof.priorities = [{ title: '', desc: '' }];
+    prof.priorities = [{ id: uid('row'), title: '', desc: '' }];
     prof.targets = targets; prof.currents = currents;
     return migrate({
       v: PLAN_VERSION, createdAt: nowIso(), updatedAt: '', updatedBy: '',
@@ -12246,14 +12532,21 @@ function ssEnter(){
     while (d <= m.end && guard++ < 1200) { if (days.indexOf(dowOf(d)) >= 0) out.push(d); d = addDays(d, 1); }
     return out;
   }
-  function rangeText(label, a, b) { return (label || '') + (b - a <= 1 ? String(a + 1) : (a + 1) + '〜' + b); }
+  // a〜b は 0 始まりの通し番号（終わりは含まない）。off は開始番号−1（途中から始める教材）
+  function rangeText(label, a, b, off) { off = off || 0; return (label || '') + (b - a <= 1 ? String(off + a + 1) : (off + a + 1) + '〜' + (off + b)); }
+  // 開始番号（途中まで進んだ教材を、例えば「問題61」から割り振るとき）
+  function startNo(m) { var v = Math.floor(num(m && m.startNo) || 1); return v > 1 ? v : 1; }
+  // 数の単位：「例題」「問題」なら「題」、それ以外（テーマ・小単元・ページなど）はその呼び方を使う
+  function unitOf(m) { var l = String((m && m.unitLabel) || '').trim(); return (!l || /題$/.test(l)) ? '題' : l; }
+  // 自動で表示する範囲（例：問題61〜100）
+  function autoRange(m) { var C = Math.floor(num(m.count) || 0); if (!C) return ''; var a = startNo(m); return (m.unitLabel || '') + a + '〜' + (a + C - 1); }
   function splitPasses(a, b, C) {
     var segs = [], p = a;
     while (p < b) { var cyc = Math.floor(p / C), from = p % C, end = Math.min(b, (cyc + 1) * C); segs.push({ cycle: cyc, from: from, to: from + (end - p) }); p = end; }
     return segs;
   }
   var _allocCache = {};
-  function allocKey(m) { return [m.id, m.start, m.end, m.count, m.rounds, m.pattern, matDays(m).join(''), m.unitLabel, m.minPerItem].join('|'); }
+  function allocKey(m) { return [m.id, m.start, m.end, m.count, m.rounds, m.pattern, matDays(m).join(''), m.unitLabel, m.minPerItem, startNo(m)].join('|'); }
   function alloc(m) {
     var k = allocKey(m);
     if (!_allocCache[k]) { _allocCache[k] = computeAlloc(m); }
@@ -12261,7 +12554,7 @@ function ssEnter(){
   }
   function computeAlloc(m) {
     var C = Math.max(0, Math.floor(num(m.count) || 0)), R = Math.max(1, Math.floor(num(m.rounds) || 1));
-    var dates = teachingDates(m), label = m.unitLabel || '', mpi = num(m.minPerItem) || 15, slots = [];
+    var dates = teachingDates(m), label = m.unitLabel || '', mpi = num(m.minPerItem) || 15, slots = [], off = startNo(m) - 1;
     if (!C || !dates.length) return slots;
     if (m.pattern === 'redo') {
       var weeks = {}, order = [];
@@ -12284,7 +12577,7 @@ function ssEnter(){
           if (!(r.b > r.a)) { lastNew[r.week] = null; return; }
           var segs = splitPasses(r.a, r.b, C);
           slots.push({ date: r.date, kind: 'study', units: r.b - r.a, qty: r.b - r.a, items: segs, minutes: round5((r.b - r.a) * mpi),
-            text: segs.map(function (s) { return rangeText(label, s.from, s.to) + '（' + (2 * s.cycle + 1) + '周目）'; }).join('、') });
+            text: segs.map(function (s) { return rangeText(label, s.from, s.to, off) + '（' + (2 * s.cycle + 1) + '周目）'; }).join('、') });
           lastNew[r.week] = segs;
           weekItems[r.week] = (weekItems[r.week] || []).concat(segs);
         } else if (r.role === 'redo') {
@@ -12293,14 +12586,14 @@ function ssEnter(){
           var cnt = 0, units = 0;
           prev.forEach(function (s) { cnt += s.to - s.from; if (2 * s.cycle + 2 <= R) units += s.to - s.from; });
           slots.push({ date: r.date, kind: 'redo', units: units, qty: cnt, items: prev, minutes: round5(cnt * mpi * 0.6),
-            text: prev.map(function (s) { return rangeText(label, s.from, s.to); }).join('、') + '：解き直し（' + uniq(prev.map(function (s) { return (2 * s.cycle + 2) + '周目'; })).join('・') + '）' });
+            text: prev.map(function (s) { return rangeText(label, s.from, s.to, off); }).join('、') + '：解き直し（' + uniq(prev.map(function (s) { return (2 * s.cycle + 2) + '周目'; })).join('・') + '）' });
           lastNew[r.week] = null;
         } else {
           var its = weekItems[r.week] || [];
           if (!its.length) return;
           var mn = Math.min.apply(null, its.map(function (s) { return s.from; })), mx = Math.max.apply(null, its.map(function (s) { return s.to; }));
           var c3 = its.reduce(function (a, s) { return a + (s.to - s.from); }, 0);
-          slots.push({ date: r.date, kind: 'check', units: 0, qty: c3, items: [], minutes: round5(Math.min(60, Math.max(20, c3 * mpi * 0.4))), text: rangeText(label, mn, mx) + '：確認問題' });
+          slots.push({ date: r.date, kind: 'check', units: 0, qty: c3, items: [], minutes: round5(Math.min(60, Math.max(20, c3 * mpi * 0.4))), text: rangeText(label, mn, mx, off) + '：確認問題' });
         }
       });
     } else {
@@ -12310,7 +12603,7 @@ function ssEnter(){
         if (b <= a) return;
         var segs = splitPasses(a, b, C);
         slots.push({ date: d, kind: 'study', units: b - a, qty: b - a, items: segs, minutes: round5((b - a) * mpi),
-          text: segs.map(function (s) { return rangeText(label, s.from, s.to) + (R > 1 ? '（' + (s.cycle + 1) + '周目）' : ''); }).join('、') });
+          text: segs.map(function (s) { return rangeText(label, s.from, s.to, off) + (R > 1 ? '（' + (s.cycle + 1) + '周目）' : ''); }).join('、') });
       });
     }
     return slots;
@@ -12326,7 +12619,7 @@ function ssEnter(){
     }); });
     var R = Math.max(1, num(m.rounds) || 1), label = m.unitLabel || '';
     return cycles.sort(function (a, b) { return a - b; }).map(function (c) {
-      var r = byCycle[c], t = rangeText(label, r.a, r.b);
+      var r = byCycle[c], t = rangeText(label, r.a, r.b, startNo(m) - 1);
       if (m.pattern === 'redo') return t + '（' + (2 * c + 1) + (2 * c + 2 <= R ? '・' + (2 * c + 2) : '') + '周目）';
       return t + (R > 1 ? '（' + (c + 1) + '周目）' : '');
     }).join('／');
@@ -12341,18 +12634,23 @@ function ssEnter(){
   /* ---------- 進捗・到達度の集計 ---------- */
   function isDone(t) { return t.status === 'submitted' || t.status === 'graded'; }
   function level(acc, pass) { if (acc == null) return null; if (acc >= pass) return 4; if (acc >= pass - 15) return 3; if (acc >= 50) return 2; return 1; }
+  // 予定・提出の判定に入れる課題：前日までの課題と、今日の課題のうち提出済みのもの
+  // （今日の課題は、まだ提出していなくても遅れ扱いにしない）。過去の日で区切るときはその日までをすべて入れる。
+  function isDueBy(date, done, upto, t0) { return upto < t0 ? date <= upto : (date < t0 || (date === t0 && done)); }
   function matStats(m, upto) {
-    var p = S.plan, C = num(m.count) || 0, R = Math.max(1, num(m.rounds) || 1), U = C * R;
-    upto = upto || today();
+    var p = S.plan, C = num(m.count) || 0, R = Math.max(1, num(m.rounds) || 1), U = C * R, t0 = today();
+    upto = upto || t0;
+    var doneKey = {};
+    p.tasks.forEach(function (t) { if (t.materialId === m.id && isDone(t)) doneKey[(t.origDate || t.date) + '|' + t.kind] = 1; });
     var planned = 0;
-    alloc(m).forEach(function (s) { if (s.date <= upto) planned += s.units; });
+    alloc(m).forEach(function (s) { if (isDueBy(s.date, !!doneKey[s.date + '|' + s.kind], upto, t0)) planned += s.units; });
     planned = U ? Math.min(planned, U) : planned;
     var done = 0, cor = 0, tot = 0, due = 0, sub = 0;
     p.tasks.forEach(function (t) {
       if (t.materialId !== m.id) return;
       if (isDone(t)) done += num(t.units) || 0;
       if (t.status === 'graded' && num(t.total) > 0) { cor += num(t.correct) || 0; tot += num(t.total); }
-      if (t.date <= upto) { due++; if (isDone(t)) sub++; }
+      if (isDueBy(t.date, isDone(t), upto, t0)) { due++; if (isDone(t)) sub++; }
     });
     if (U) done = Math.min(done, U);
     var acc = tot > 0 ? Math.round(cor / tot * 100) : null, pass = num(m.passPct) || 80;
@@ -12364,7 +12662,7 @@ function ssEnter(){
     };
   }
   function subjectStats(sub, upto) {
-    var p = S.plan; upto = upto || today();
+    var p = S.plan, t0 = today(); upto = upto || t0;
     var U = 0, done = 0, planned = 0, cor = 0, tot = 0, passSum = 0, passN = 0;
     p.materials.forEach(function (m) {
       if (m.subject !== sub) return;
@@ -12374,7 +12672,7 @@ function ssEnter(){
     p.tasks.forEach(function (t) {
       if (t.subject !== sub) return;
       if (t.status === 'graded' && num(t.total) > 0 && !t.materialId) { cor += num(t.correct) || 0; tot += num(t.total); }
-      if (t.date <= upto && t.date >= from28) { due++; if (isDone(t)) subm++; }
+      if (t.date >= from28 && isDueBy(t.date, isDone(t), upto, t0)) { due++; if (isDone(t)) subm++; }
     });
     p.materials.forEach(function (m) { if (m.subject !== sub) return; var st = matStats(m, upto); cor += st.cor; tot += st.tot; });
     var acc = tot > 0 ? Math.round(cor / tot * 100) : null, pass = passN ? Math.round(passSum / passN) : 80;
@@ -12429,7 +12727,13 @@ function ssEnter(){
       try { body = VIEWS[tab](); } catch (e) { console.error('[GR] render error', e); body = '<div class="gr-callout">画面の表示中にエラーが発生しました：' + esc(e.message) + '</div>'; }
       html += '<div class="gr-view" id="gr-view-' + pg + '" data-tab="' + tab + '">' + body + '</div>';
     }
+    var keep = null;
+    if (S.keepForm) {
+      keep = { task: S.gradeTaskId, v: {} };
+      [].slice.call(root.querySelectorAll('input[id^="gr-g-"], textarea[id^="gr-g-"], select[id^="gr-g-"]')).forEach(function (el) { keep.v[el.id] = el.type === 'checkbox' ? el.checked : el.value; });
+    }
     root.innerHTML = html;
+    if (keep && keep.task && keep.task === S.gradeTaskId) Object.keys(keep.v).forEach(function (id) { var el = document.getElementById(id); if (!el) return; if (el.type === 'checkbox') el.checked = keep.v[id]; else el.value = keep.v[id]; });
     renderStatus();
     if (S.plan && AFTER[tab]) { try { AFTER[tab](); } catch (e) { console.warn('[GR] after-render', e); } }
     if (Math.abs(window.scrollY - y) > 2) window.scrollTo(0, y);
@@ -12453,6 +12757,7 @@ function ssEnter(){
       else if (st === 'error') { txt = '未同期（自動で再試行します）'; title = S.cloudMsg || ''; }
       else if (st === 'missing') { txt = 'この端末にのみ保存中（クラウド未設定）'; title = 'クリックで設定方法を表示'; }
       else { txt = cloudEnabled() ? 'この端末に保存（生徒のDB登録後にクラウド保存）' : 'この端末に保存'; }
+      if (S.cloudNote && Date.now() - S.cloudNoteAt < 15000 && (st === 'ok' || st === 'syncing')) txt += '・' + S.cloudNote;
       if (S.lsFailed) txt += '・端末の容量不足';
       el.className = 'gr-status ' + st; el.textContent = txt; el.title = title;
       if (st === 'missing') el.setAttribute('data-gr-act', 'setup'); else el.removeAttribute('data-gr-act');
@@ -12466,7 +12771,7 @@ function ssEnter(){
   function emptyNoPlan() {
     var st = S.student;
     return '<div class="gr-card"><div class="gr-card-h"><span>' + esc(st.name) + ' さんの個別ロードマップ</span></div><div class="gr-card-b"><div class="gr-empty"><div class="gr-empty-icon">🗺️</div><div class="gr-empty-title">まだ作成されていません</div>'
-      + '<div style="max-width:600px;margin:0 auto 16px;line-height:1.85;">生徒登録の情報（志望校・入試時期・科目・偏差値・ロードマップに手動で追加した参考書）を下書きとして取り込み、合格までの段階（基礎理解→典型定着→標準演習→応用演習→過去問演習→最終調整）を入試時期から自動で割り振ります。作成後はすべての項目を自由に修正できます。</div>'
+      + '<div style="max-width:600px;margin:0 auto 16px;line-height:1.85;">生徒登録の情報（志望校・入試時期・科目・偏差値・ロードマップに手動で追加した参考書）を下書きとして取り込み、合格までの段階（基礎理解→典型定着→標準演習→応用演習→過去問演習→最終調整）を入試時期から逆算して割り振ります（入試まで短い場合は、過去問演習・最終調整など入試に近い段階を優先して確保します）。作成後はすべての項目を自由に修正できます。</div>'
       + '<button class="btn btn-primary" data-gr-act="create">この生徒のロードマップを作成する</button></div></div></div>';
   }
 
@@ -12533,14 +12838,14 @@ function ssEnter(){
   function periodShort(a, b) { if (!a) return '—'; return (a === b || !b) ? monthShort(a) : monthShort(a) + '〜' + monthShort(b); }
   function matStatusPill(s) { var c = s === '完了' ? 'done' : s === '進行中' ? 'doing' : ''; return '<span class="gr-pill ' + c + '">' + esc(s || '未着手') + '</span>'; }
   function prioPill(p) { if (!p) return ''; return ' <span class="gr-pill ' + ({ '高': 'hi', '中': 'mid', '低': 'lo' }[p] || '') + '">優先度：' + esc(p) + '</span>'; }
-  function diffText(d) { if (!d) return '<span class="gr-diff">予定どおり</span>'; return '<span class="gr-diff ' + (d > 0 ? 'plus' : 'minus') + '">予定比' + (d > 0 ? '+' : '') + d + '題</span>'; }
+  function diffText(d, unit) { if (!d) return '<span class="gr-diff">予定どおり</span>'; return '<span class="gr-diff ' + (d > 0 ? 'plus' : 'minus') + '">予定比' + (d > 0 ? '+' : '') + d + esc(unit || '題') + '</span>'; }
   function lvBadge(lv) { return lv ? '<span class="gr-lv l' + lv + '">' + LV_LABEL[lv] + '</span>' : '<span class="gr-lv l0">未評価</span>'; }
   function progBar(prog, plannedPct) {
-    return '<div class="gr-bar"><i style="width:' + clamp(prog || 0, 0, 100) + '%"></i>' + (plannedPct != null ? '<b style="left:' + clamp(plannedPct, 0, 100) + '%" title="今日までの予定"></b>' : '') + '</div>';
+    return '<div class="gr-bar"><i style="width:' + clamp(prog || 0, 0, 100) + '%"></i>' + (plannedPct != null ? '<b style="left:' + clamp(plannedPct, 0, 100) + '%" title="予定（前日までの分。今日の分は提出したら加算）"></b>' : '') + '</div>';
   }
-  function progCell(st) {
+  function progCell(st, unit) {
     if (st.prog == null) return '<span class="gr-muted">問題数・期間を入れると表示</span>';
-    return progBar(st.prog, st.plannedPct) + '<div class="gr-muted" style="margin-top:3px">完了' + st.prog + '%（予定' + st.plannedPct + '%）<br>' + diffText(st.diff) + '</div>';
+    return progBar(st.prog, st.plannedPct) + '<div class="gr-muted" style="margin-top:3px">完了' + st.prog + '%（予定' + st.plannedPct + '%）<br>' + diffText(st.diff, unit) + '</div>';
   }
   function fmtDT(iso) { if (!iso) return ''; var d = new Date(iso); return (d.getMonth() + 1) + '/' + d.getDate() + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()); }
   function stageAt(k) { return S.plan.stages.filter(function (s) { return s.start && s.end && k >= s.start && k <= s.end; })[0]; }
@@ -12658,19 +12963,19 @@ function ssEnter(){
     var mats = sortedMaterials().filter(function (m) { return !f || m.subject === f; });
     var rows = mats.map(function (m) {
       var st = matStats(m), per = matPerDay(m);
-      var rng = m.range || (num(m.count) ? (m.unitLabel || '') + '1〜' + m.count : '');
+      var rng = m.range || autoRange(m), u = unitOf(m);
       return '<tr class="gr-row-click" data-gr-act="mat-edit" data-id="' + esc(m.id) + '"><td><div class="gr-sub-cell"><span class="gr-dot" style="background:' + subjectColor(m.subject) + '"></span>' + esc(m.subject || '—') + '</div></td>'
         + '<td><b>' + esc(m.name) + '</b>' + prioPill(m.priority) + (m.prereq ? '<div class="gr-muted">前提：' + esc(m.prereq) + '</div>' : '') + '</td>'
         + '<td>' + esc(m.purpose || '—') + '</td>'
-        + '<td>' + esc(rng || '—') + '<div class="gr-muted">' + (num(m.count) ? m.count + '題 × ' + (m.rounds || 1) + '周' + (m.pattern === 'redo' ? '（解き直し型）' : '') : '問題数未設定') + '</div></td>'
-        + '<td style="white-space:nowrap">' + (m.start && m.end ? mdLabel(m.start) + '〜' + mdLabel(m.end) : '—') + '<div class="gr-muted">' + (per ? '1日 約' + (Math.round(per * 10) / 10) + '題' : '') + '</div></td>'
+        + '<td>' + esc(rng || '—') + '<div class="gr-muted">' + (num(m.count) ? m.count + esc(u) + ' × ' + (m.rounds || 1) + '周' + (m.pattern === 'redo' ? '（解き直し型）' : '') : '問題数未設定') + '</div></td>'
+        + '<td style="white-space:nowrap">' + (m.start && m.end ? mdLabel(m.start) + '〜' + mdLabel(m.end) : '—') + '<div class="gr-muted">' + (per ? '1日 約' + (Math.round(per * 10) / 10) + esc(u) : '') + '</div></td>'
         + '<td>' + esc(m.criteria || '—') + (num(m.passPct) ? '<div class="gr-muted">基準 正答率' + m.passPct + '%</div>' : '') + '</td>'
-        + '<td style="min-width:120px">' + progCell(st) + '</td>'
+        + '<td style="min-width:120px">' + progCell(st, u) + '</td>'
         + '<td>' + matStatusPill(m.status) + (m.teacher ? '<div class="gr-muted">' + esc(m.teacher) + '</div>' : '') + '</td></tr>';
     }).join('');
     if (!rows) rows = '<tr><td colspan="8" class="gr-muted" style="text-align:center;padding:18px;line-height:1.8">' + (f ? 'この科目の教材はまだありません。' : '教材がまだ登録されていません。<br>「＋ 教材を追加」から、教材名・使う目的・範囲・期間・到達基準をセットで登録してください。') + '</td></tr>';
     var matCard = toolbar + '<div class="gr-table-wrap"><table class="gr-table"><tr><th>科目</th><th>教材</th><th>目的</th><th>範囲・問題数</th><th>期間</th><th>到達基準</th><th>進捗</th><th>状態</th></tr>' + rows + '</table></div>'
-      + '<div class="gr-note">「終わった」と「できる」を分けて管理します。進捗は提出済みの課題から、到達度は採点の正答率から自動で集計されます。</div>';
+      + '<div class="gr-note">「終わった」と「できる」を分けて管理します。進捗は提出済みの課題から、到達度は採点の正答率から自動で集計されます。予定比は前日までの課題で判定します（今日の課題は提出した時点で加わります）。</div>';
 
     var nowK = thisMonth();
     var stagesVis = '<div class="gr-stages">' + p.stages.map(function (sg) {
@@ -12719,7 +13024,7 @@ function ssEnter(){
     var evs = p.events.filter(function (e) { return e.date; });
     if (evs.length) rows += '<div class="gr-g-row"><div class="gr-g-label"><b>模試・節目</b></div><div class="gr-g-track">' + gl + tl + evs.map(function (e) {
       var x = pos(e.date.slice(0, 7) + '-15', false); if (x <= 0 || x >= N) return '';
-      return '<div class="gr-g-ev" style="left:' + (x / N * 100) + '%;' + (e.kind === '模試' ? '' : 'background:var(--teal)') + '" title="' + esc(e.kind + '：' + e.label) + '">' + esc(e.label || e.kind) + '</div>';
+      return '<div class="gr-g-ev" style="left:' + (x / N * 100) + '%;max-width:' + (100 / N) + '%;' + (e.kind === '模試' ? '' : 'background:var(--teal)') + '" title="' + esc(e.kind + '：' + e.label) + '">' + esc(e.label || e.kind) + '</div>';
     }).join('') + '</div></div>';
     planSubjects().concat(['']).forEach(function (sub) {
       var ms = sortedMaterials().filter(function (m) { return (m.subject || '') === sub && m.start && m.end; });
@@ -12759,7 +13064,7 @@ function ssEnter(){
     if (!slots.length) return '';
     var q = slots.filter(function (s) { return s.kind === 'study'; }).reduce(function (a, s) { return a + (s.qty || 0); }, 0);
     var checks = slots.filter(function (s) { return s.kind === 'check'; }).length;
-    return '新規' + q + '題' + (m.pattern === 'redo' ? '＋翌日の解き直し' : '') + (checks ? '・確認問題' + checks + '回' : '');
+    return '新規' + q + unitOf(m) + (m.pattern === 'redo' ? '＋翌日の解き直し' : '') + (checks ? '・確認問題' + checks + '回' : '');
   }
   function viewMonthly() {
     var p = S.plan, M = S.month || (S.month = thisMonth());
@@ -12774,7 +13079,7 @@ function ssEnter(){
       return '<tr><td style="min-width:150px"><div class="gr-sub-cell"><span class="gr-dot" style="background:' + subjectColor(m.subject) + '"></span>' + esc(m.subject) + '</div><div style="margin-top:4px;font-weight:700">' + esc(m.name) + '</div>' + (m.purpose ? '<div class="gr-muted">' + esc(m.purpose) + '</div>' : '') + '</td>'
         + '<td style="min-width:200px"><div class="gr-muted">今月の範囲（自動）</div><div style="margin-bottom:6px">' + esc(auto || '（この月の割り振りはありません）') + '</div><div class="gr-muted">進捗目標</div>' + inp(base + 'goal', { ph: autoGoal(m, from, to) || '例：指定例題を2周', isDefault: !!autoGoal(m, from, to) }) + '</td>'
         + '<td style="min-width:200px"><div class="gr-muted">到達目標</div>' + inp(base + 'target', { ph: m.criteria || '例：初見類題で80%以上', isDefault: !!m.criteria }) + '<div class="gr-muted" style="margin-top:6px">評価方法</div>' + inp(base + 'evalMethod', { ph: m.evalMethod || '例：初見類題10題', isDefault: !!m.evalMethod }) + '</td>'
-        + '<td style="min-width:140px">' + monthResultCell(ms) + '</td>'
+        + '<td style="min-width:140px">' + monthResultCell(ms, unitOf(m)) + '</td>'
         + '<td style="min-width:210px">' + judgeCell(M, m, r) + '</td></tr>';
     }).join('');
     if (!rows) rows = '<tr><td colspan="5" class="gr-muted" style="text-align:center;padding:18px">この月に取り組む教材がありません。「教材・年間計画」で教材の期間を設定してください。</td></tr>';
@@ -12787,9 +13092,9 @@ function ssEnter(){
       + card('面談での説明例', ta('months.' + M + '.talk', { rows: 7, ph: '英文法は判断力が改善。一方、物理は図示から立式する過程に課題が残るため、翌月は問題数より説明の再現性を重視します。' }), { h: 'blue' })
       + '</div>';
   }
-  function monthResultCell(ms) {
+  function monthResultCell(ms, unit) {
     if (!ms.n && !ms.planned) return '<span class="gr-muted">—</span>';
-    return '<div class="gr-muted">完了（今月の予定比）</div>' + progBar(ms.rate || 0, null) + '<div style="font-size:12px;margin:3px 0 6px">' + (ms.rate != null ? ms.rate + '%' : '—') + ' <span class="gr-muted">' + ms.done + '/' + ms.planned + '題</span></div>'
+    return '<div class="gr-muted">完了（今月の予定比）</div>' + progBar(ms.rate || 0, null) + '<div style="font-size:12px;margin:3px 0 6px">' + (ms.rate != null ? ms.rate + '%' : '—') + ' <span class="gr-muted">' + ms.done + '/' + ms.planned + esc(unit || '題') + '</span></div>'
       + '<div class="gr-muted">正答率</div><div style="font-size:12px">' + (ms.acc != null ? ms.acc + '% ' + (ms.acc >= ms.pass ? '<span class="gr-lv l4">基準達成</span>' : '<span class="gr-muted">（基準' + ms.pass + '%）</span>') : '<span class="gr-muted">採点データなし</span>') + '</div>';
   }
   function judgeCell(M, m, r) {
@@ -12817,16 +13122,16 @@ function ssEnter(){
     var rows = subs.map(function (s) {
       var st = subjectStats(s, t0);
       return '<tr><td><div class="gr-sub-cell"><span class="gr-dot" style="background:' + subjectColor(s) + '"></span>' + esc(s) + '</div></td>'
-        + '<td style="min-width:220px">' + (st.prog != null ? progBar(st.prog, st.plannedPct) + '<div class="gr-muted" style="margin-top:3px">完了' + st.prog + '%（今日までの予定' + st.plannedPct + '%）</div>' : '<span class="gr-muted">教材の問題数・期間が未設定</span>') + '</td>'
+        + '<td style="min-width:220px">' + (st.prog != null ? progBar(st.prog, st.plannedPct) + '<div class="gr-muted" style="margin-top:3px">完了' + st.prog + '%（予定' + st.plannedPct + '%）</div>' : '<span class="gr-muted">教材の問題数・期間が未設定</span>') + '</td>'
         + '<td>' + lvBadge(st.lv) + '</td><td class="num">' + (st.acc != null ? st.acc + '%' : '—') + '<div class="gr-muted">基準' + st.pass + '%</div></td>'
         + '<td class="num">' + (st.subRate != null ? st.subRate + '%' : '—') + '<div class="gr-muted">' + st.sub + '/' + st.due + '件</div></td></tr>';
     }).join('');
     var subjCard = summary + '<div class="gr-table-wrap"><table class="gr-table"><tr><th>科目</th><th>進捗（完了率）</th><th>理解度</th><th class="num">正答率</th><th class="num">提出率（直近4週）</th></tr>' + rows + '</table></div>'
-      + '<div class="gr-note">進捗率と到達度は別の指標です。100%完了でも正答率が基準に届かない教材は、復習キューと翌月の計画で補強します。理解度は正答率と教材の到達基準から自動判定します（Lv.4＝基準到達／Lv.3＝基準まで15pt以内／Lv.2＝50%以上／Lv.1＝50%未満）。</div>';
+      + '<div class="gr-note">進捗率と到達度は別の指標です。100%完了でも正答率が基準に届かない教材は、復習キューと翌月の計画で補強します。理解度は正答率と教材の到達基準から自動判定します（Lv.4＝基準到達／Lv.3＝基準まで15pt以内／Lv.2＝50%以上／Lv.1＝50%未満）。予定と提出率は前日までの課題で判定し、今日の課題は提出した時点で加わります。</div>';
     var mrows = sortedMaterials().map(function (m) {
       var st = matStats(m, t0);
       return '<tr class="gr-row-click" data-gr-act="mat-edit" data-id="' + esc(m.id) + '"><td><div class="gr-sub-cell"><span class="gr-dot" style="background:' + subjectColor(m.subject) + '"></span>' + esc(m.subject) + '</div></td><td><b>' + esc(m.name) + '</b><div class="gr-muted">' + (m.start && m.end ? mdLabel(m.start) + '〜' + mdLabel(m.end) : '期間未設定') + '</div></td>'
-        + '<td style="min-width:150px">' + progCell(st) + '</td><td class="num">' + (st.acc != null ? st.acc + '%' : '—') + '<div class="gr-muted">基準' + st.pass + '%</div></td><td>' + lvBadge(st.lv) + '</td>'
+        + '<td style="min-width:150px">' + progCell(st, unitOf(m)) + '</td><td class="num">' + (st.acc != null ? st.acc + '%' : '—') + '<div class="gr-muted">基準' + st.pass + '%</div></td><td>' + lvBadge(st.lv) + '</td>'
         + '<td class="num">' + (st.openReviews ? '<b style="color:#b0412a">' + st.openReviews + '</b>件' : '0件') + '</td><td>' + matStatusPill(m.status) + '</td></tr>';
     }).join('') || '<tr><td colspan="7" class="gr-muted" style="text-align:center;padding:14px">教材が登録されていません</td></tr>';
     var matCard = '<div class="gr-table-wrap"><table class="gr-table"><tr><th>科目</th><th>教材</th><th>完了率</th><th class="num">正答率</th><th>理解度</th><th class="num">未完了の復習</th><th>状態</th></tr>' + mrows + '</table></div>';
@@ -12913,9 +13218,10 @@ function ssEnter(){
     list.forEach(function (r) { if (t.reviewIds.indexOf(r.id) < 0) t.reviewIds.push(r.id); r.taskId = t.id; });
     refreshReviewTask(t);
   }
-  function refreshReviewTask(t) {
-    var items = (t.reviewIds || []).map(reviewById).filter(Boolean);
-    t.content = '復習：' + items.map(function (r) { var m = r.materialId ? matById(r.materialId) : null; return (m ? shortName(m.name) + ' ' : '') + r.item; }).join('、');
+  function refreshReviewTask(t) { refreshReviewTaskIn(S.plan, t); }
+  function refreshReviewTaskIn(p, t) {
+    var items = (t.reviewIds || []).map(function (id) { return p.reviews.filter(function (r) { return r.id === id; })[0]; }).filter(Boolean);
+    t.content = '復習：' + items.map(function (r) { var m = r.materialId ? p.materials.filter(function (x) { return x.id === r.materialId; })[0] : null; return (m ? shortName(m.name) + ' ' : '') + r.item; }).join('、');
     t.minutes = round5(Math.max(15, items.length * 10));
     t.qty = items.length;
   }
@@ -13174,6 +13480,7 @@ function ssEnter(){
       + mField('対象範囲（表示用）', mInput('gr-m-range', d.range, { ph: '例題1〜60（指定単元）' }))
       + mField('問題の呼び方', mInput('gr-m-unitLabel', d.unitLabel, { ph: '例題', list: 'gr-unitlabels' }))
       + mField('問題数（自動配分に使用）', mInput('gr-m-count', d.count, { type: 'number', num: true, min: 0, ph: '60' }))
+      + mField('開始番号（途中から始めるとき）', mInput('gr-m-startNo', d.startNo, { type: 'number', num: true, min: 1, ph: '1' }))
       + mField('周回数', mInput('gr-m-rounds', d.rounds, { type: 'number', num: true, min: 1, ph: '2' }))
       + mField('開始日', mInput('gr-m-start', d.start, { type: 'date' }))
       + mField('終了日', mInput('gr-m-end', d.end, { type: 'date' }))
@@ -13199,7 +13506,7 @@ function ssEnter(){
     var days = [].slice.call(document.querySelectorAll('.gr-m-day')).filter(function (c) { return c.checked; }).map(function (c) { return +c.value; });
     var pp = num(gv('gr-m-passPct'));
     return { id: S.modal ? S.modal.id : uid('m'), subject: subj, name: gv('gr-m-name').trim(), purpose: gv('gr-m-purpose').trim(), range: gv('gr-m-range').trim(), unitLabel: gv('gr-m-unitLabel').trim(),
-      count: num(gv('gr-m-count')), rounds: Math.max(1, Math.floor(num(gv('gr-m-rounds')) || 1)), start: gv('gr-m-start'), end: gv('gr-m-end'), pattern: gv('gr-m-pattern') || 'straight',
+      count: num(gv('gr-m-count')), startNo: (Math.floor(num(gv('gr-m-startNo')) || 1) > 1 ? Math.floor(num(gv('gr-m-startNo'))) : null), rounds: Math.max(1, Math.floor(num(gv('gr-m-rounds')) || 1)), start: gv('gr-m-start'), end: gv('gr-m-end'), pattern: gv('gr-m-pattern') || 'straight',
       minPerItem: num(gv('gr-m-minPerItem')) || 15, days: days.length ? days : [1, 2, 3, 4, 5], criteria: gv('gr-m-criteria').trim(), passPct: pp == null ? 80 : clamp(pp, 0, 100),
       evalMethod: gv('gr-m-evalMethod').trim(), priority: gv('gr-m-priority'), prereq: gv('gr-m-prereq').trim(), teacher: gv('gr-m-teacher').trim(), status: gv('gr-m-status') || '未着手' };
   }
@@ -13214,11 +13521,11 @@ function ssEnter(){
     var slots = computeAlloc(d), study = slots.filter(function (s) { return s.kind === 'study'; });
     var perDay = study.length ? study.reduce(function (a, s) { return a + s.qty; }, 0) / study.length : 0;
     var mins = slots.length ? Math.round(slots.reduce(function (a, s) { return a + s.minutes; }, 0) / slots.length) : 0;
-    el.innerHTML = '課題日 <b>' + dates.length + '</b>日（新しい範囲を進める日 ' + study.length + '日）／1日あたり 約<b>' + (Math.round(perDay * 10) / 10) + '</b>' + esc(d.unitLabel || '題') + '・目安 約' + mins + '分／合計 ' + C + '題 × ' + d.rounds + '周'
+    el.innerHTML = '範囲 <b>' + esc(autoRange(d)) + '</b>／課題日 <b>' + dates.length + '</b>日（新しい範囲を進める日 ' + study.length + '日）／1日あたり 約<b>' + (Math.round(perDay * 10) / 10) + '</b>' + esc(unitOf(d)) + '・目安 約' + mins + '分／合計 ' + C + esc(unitOf(d)) + ' × ' + d.rounds + '周'
       + (d.pattern === 'redo' ? '<br>解き直しが偶数周目を兼ねます（周回数2なら「新規1周＋翌日の解き直し1周」）。' : '');
   }
   function schedSummary(m) {
-    return [m.start && m.end ? mdLabel(m.start) + '〜' + mdLabel(m.end) : '期間未設定', (num(m.count) ? m.count + '題' : '問題数未設定') + '×' + (m.rounds || 1) + '周' + (m.pattern === 'redo' ? '（解き直し型）' : ''),
+    return [m.start && m.end ? mdLabel(m.start) + '〜' + mdLabel(m.end) : '期間未設定', (num(m.count) ? (startNo(m) > 1 ? autoRange(m) + '・' : '') + m.count + unitOf(m) : '問題数未設定') + '×' + (m.rounds || 1) + '周' + (m.pattern === 'redo' ? '（解き直し型）' : ''),
       '到達基準：' + (m.criteria || '—') + (num(m.passPct) != null ? '（' + m.passPct + '%）' : '')].join('／');
   }
   function saveMaterial() {
@@ -13229,7 +13536,7 @@ function ssEnter(){
     if ((d.start && !d.end) || (!d.start && d.end)) { err.textContent = '開始日と終了日は両方入れてください'; return; }
     if (md.isNew) p.materials.push(d);
     else {
-      var m = matById(d.id); if (!m) { closeModal(); return; }
+      var m = matById(d.id); if (!m) { closeModal(); toast('この教材は他の画面で削除されたため、保存できませんでした'); rerender(); return; }
       var before = schedSummary(md.orig), after = schedSummary(d);
       Object.keys(d).forEach(function (k) { m[k] = d[k]; });
       if (before !== after) addHistory('教材：' + d.name, before, after, gv('gr-m-reason').trim(), '');
@@ -13269,6 +13576,7 @@ function ssEnter(){
     var d = { date: date, subject: gv('gr-t-subject'), materialId: gv('gr-t-material') || null, kind: gv('gr-t-kind') || 'other', content: gv('gr-t-content').trim(), minutes: num(gv('gr-t-minutes')), qty: num(gv('gr-t-qty')), status: gv('gr-t-status') || 'todo' };
     var counts = d.materialId && (d.kind === 'study' || d.kind === 'redo');
     var t = md.isNew ? null : taskById(md.id);
+    if (!md.isNew && !t) { closeModal(); toast('この課題は他の画面で削除されたため、保存できませんでした'); rerender(); return; }
     if (!t) {
       t = { id: md.id, auto: false, edited: true, units: counts ? (d.qty || 0) : 0 };
       Object.keys(d).forEach(function (k) { t[k] = d[k]; });
@@ -13346,7 +13654,7 @@ function ssEnter(){
     S.modal = { type: 'setup' };
     var body = '<div style="font-size:13px;line-height:1.8">いまは個別ロードマップがこの端末（ブラウザ）にだけ保存されています。Supabaseに保存用のテーブルを1つ作ると、どのPCからでも同じロードマップを開いて編集できるようになります。作成後、この端末のデータは自動でクラウドへアップロードされます。</div>'
       + '<ol class="gr-steps"><li>Supabaseダッシュボードで、このシステムのプロジェクト（Galileo-Strategy）を開く</li><li>左メニューの「SQL Editor」で新しいクエリを開く</li><li>下のSQLを貼り付けて「Run」を押す</li><li>このシステムに戻り「接続を確認」を押す</li></ol>'
-      + '<pre class="gr-sql">' + esc(SETUP_SQL) + '</pre><div class="gr-note">ログインしたスタッフだけが読み書きできる設定（RLS）になっています。同じ生徒を複数の端末で同時に編集した場合は、最後に保存した内容が残ります。</div>';
+      + '<pre class="gr-sql">' + esc(SETUP_SQL) + '</pre><div class="gr-note">ログインしたスタッフだけが読み書きできる設定（RLS）になっています。同じ生徒を複数の端末で同時に編集しても、課題・教材などの項目ごとに双方の変更をまとめて保存します（同じ欄を同時に書き換えた場合は、後から保存した内容が残ります）。</div>';
     showModal(modalHtml('クラウド保存の設定', body, '<button class="btn btn-secondary gr-btn-sm" data-gr-act="copy-sql">SQLをコピー</button><span class="gr-spacer"></span><button class="btn btn-secondary gr-btn-sm" data-gr-act="modal-close">閉じる</button><button class="btn btn-primary gr-btn-sm" data-gr-act="setup-recheck">接続を確認</button>'));
   }
   function recheckCloud() {
@@ -13380,6 +13688,10 @@ function ssEnter(){
       else span.className = 'gr-pv';
       if (s.type === 'month' && v) v = monthLabel(v);
       if (s.type === 'date' && v) v = mdLabel(v);
+      if (s.getAttribute('style')) span.setAttribute('style', s.getAttribute('style'));
+      var narrow = /(^|\s)w\d+(\s|$)/.test(s.className || '');
+      if (!narrow && (s.tagName === 'TEXTAREA' || s.tagName === 'SELECT' || (s.tagName === 'INPUT' && s.type !== 'checkbox'))) span.style.display = 'block';
+      try { if ((parseInt(getComputedStyle(s).fontWeight, 10) || 400) >= 600) span.style.fontWeight = '700'; } catch (e) { }
       span.textContent = v;
       df[j].parentNode.replaceChild(span, df[j]);
     }
@@ -13488,10 +13800,10 @@ function ssEnter(){
       touch(); rerender();
     },
     'stages-auto': function () {
-      confirmModal('学習段階を作り直しますか？', '入試時期（' + monthLabel(examMonthOf(S.student)) + '）までを基礎理解→典型定着→標準演習→応用演習→過去問演習→最終調整に割り振り直します。いまの段階の設定は置き換わります。', function () {
+      confirmModal('学習段階を作り直しますか？', '入試時期（' + monthLabel(examMonthOf(S.student)) + '）から逆算して、基礎理解→典型定着→標準演習→応用演習→過去問演習→最終調整を割り振り直します。入試まで短い場合は、入試に近い段階から優先して確保します。いまの段階の設定は置き換わります。', function () {
         var before = S.plan.stages.map(function (s) { return s.label + '(' + periodShort(s.start, s.end) + ')'; }).join('・');
         S.plan.stages = autoStages(thisMonth(), examMonthOf(S.student));
-        addHistory('学習段階', before, S.plan.stages.map(function (s) { return s.label + '(' + periodShort(s.start, s.end) + ')'; }).join('・'), '入試時期から自動で再計算', '');
+        addHistory('学習段階', before, S.plan.stages.map(function (s) { return s.label + '(' + periodShort(s.start, s.end) + ')'; }).join('・'), '入試時期から逆算して再計算', '');
         touch(); closeModal(); rerender(); toast('学習段階を作り直しました');
       }, '作り直す');
     },
@@ -13648,9 +13960,18 @@ function ssEnter(){
       if (e.key === 'Escape') { var ov = document.getElementById('gr-modal'); if (ov && ov.style.display !== 'none') closeModal(); }
       if (e.key === 'Enter' && e.target && e.target.id === 'gr-sub-name') { e.preventDefault(); ACT['subject-save'](); }
     });
+    // 入力欄から離れた・クリックし終えた時に、待たせていた再描画を行う（他の画面の変更の表示）
+    document.addEventListener('focusout', function () { if (S.renderPending) setTimeout(resumeAfterInput, 300); });
+    document.addEventListener('mousedown', function () { S.pointerAt = Date.now(); }, true);
+    document.addEventListener('mouseup', function () { S.pointerAt = 0; if (S.renderPending) setTimeout(resumeAfterInput, 300); }, true);
     window.addEventListener('beforeunload', flush);
-    document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'hidden') flush(); });
-    setInterval(function () { if (S.pendingCloud && S.cloud !== 'syncing') pushCloud(); }, 45000);
+    document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'hidden') flush(); else checkRemote(true); });
+    window.addEventListener('focus', function () { checkRemote(false); });
+    setInterval(function () {
+      if (S.pendingCloud && !S.busy && S.cloud !== 'missing') pushCloud();
+      else if (document.visibilityState === 'visible') checkRemote(false);
+      if (S.renderPending) resumeAfterInput();
+    }, 30000);
   }
 
   var VIEWS = { strategy: viewStrategy, materials: viewMaterials, monthly: viewMonthly, progress: viewProgress, weekly: viewWeekly, daily: viewDaily, reviews: viewReviews };
@@ -13672,11 +13993,12 @@ function ssEnter(){
   }
 
   window.GR = {
-    onShow: function (pg) { S.page = pg; render(); },
+    onShow: function (pg) { S.page = pg; render(); checkRemote(true); },
     onStudentChanged: function () { ensureLoaded(); render(); },
     flush: flush,
     render: render,
-    _debug: { state: S, alloc: alloc, computeAlloc: computeAlloc, matStats: matStats, subjectStats: subjectStats, genWeek: genWeek, autoStages: autoStages, createPlanFor: createPlanFor }
+    _debug: { state: S, alloc: alloc, computeAlloc: computeAlloc, matStats: matStats, subjectStats: subjectStats, genWeek: genWeek, autoStages: autoStages, createPlanFor: createPlanFor,
+      mergePlans: mergePlans, normalizePlan: normalizePlan, migrate: migrate, checkRemote: checkRemote, pushCloud: pushCloud }
   };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 })();
