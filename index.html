@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ガリレオ 戦略管理システム v1.2.1</title>
+<title>ガリレオ 戦略管理システム v1.2.2</title>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@400;600;700&family=Noto+Sans+JP:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.3/dist/umd/supabase.min.js"></script>
@@ -1011,7 +1011,11 @@
   .gr-g-track .gl { position:absolute; top:0; bottom:0; border-left:1px solid #f0ebde; }
   .gr-g-bar { position:absolute; top:5px; height:18px; border-radius:5px; color:#fff; font-size:10.5px; line-height:18px; padding:0 6px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; box-shadow:0 1px 2px rgba(0,0,0,.12); }
   .gr-g-bar.stage { color:var(--ink); font-weight:700; border:1px solid rgba(0,0,0,.06); box-shadow:none; }
-  .gr-g-ev { position:absolute; top:4px; transform:translateX(-50%); background:var(--accent); color:#fff; border-radius:9px; padding:0 7px; font-size:10.5px; line-height:19px; white-space:nowrap; box-sizing:border-box; overflow:hidden; text-overflow:ellipsis; }
+  .gr-g-ev { position:absolute; top:4px; margin-left:5px; background:var(--accent); color:#fff; border-radius:9px; padding:0 7px; font-size:10.5px; line-height:19px; white-space:nowrap; box-sizing:border-box; overflow:hidden; text-overflow:ellipsis; z-index:1; }
+  .gr-g-ev.tl { margin-left:0; margin-right:5px; }
+  .gr-g-ev.l1, .gr-g-evdot.l1 { top:30px; }
+  .gr-g-evdot { position:absolute; top:4px; width:7px; height:19px; transform:translateX(-50%); z-index:1; }
+  .gr-g-evdot::after { content:''; position:absolute; left:50%; top:50%; width:7px; height:7px; margin:-3.5px 0 0 -3.5px; border-radius:50%; background:#1f3329; }
   .gr-g-today { position:absolute; top:0; bottom:0; width:2px; background:#c84b31; opacity:.65; z-index:2; }
   .gr-g-group { background:#f7f4ec; font-weight:700; color:var(--ink); padding:4px 8px; font-size:11.5px; border-bottom:1px solid #eee8da; display:flex; align-items:center; gap:6px; }
 
@@ -1130,7 +1134,7 @@
       </div>
       <div>
         <div class="logo-text">ガリレオ 理系大学受験 戦略管理システム</div>
-        <span class="logo-sub">GALILEO SCIENCE EXAM STRATEGY — v1.2.1</span>
+        <span class="logo-sub">GALILEO SCIENCE EXAM STRATEGY — v1.2.2</span>
       </div>
     </div>
   </div>
@@ -1243,6 +1247,15 @@ function updateSubCheckStyle(cb) {
     <div style="margin-bottom:2rem;padding-top:0.5rem;">
       <div class="section-title">生徒登録 / ロードマップ生成</div>
       <div class="section-desc">生徒情報を入力すると、合格ロードマップが自動生成されます</div>
+    </div>
+    <!-- v1.2.2：登録済みの生徒の編集 -->
+    <div class="card" id="reg-edit-bar" style="margin-bottom:1.5rem;padding:12px 16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+      <span style="font-size:12.5px;font-weight:700;color:var(--ink);white-space:nowrap;">登録済みの生徒を編集</span>
+      <select id="reg-edit-sel" onchange="regLoadStudent(this.value)" style="padding:7px 10px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px;background:white;color:var(--ink);min-width:200px;">
+        <option value="">── 生徒を選択 ──</option>
+      </select>
+      <span id="reg-edit-status" style="font-size:12px;color:var(--text-muted);line-height:1.6;flex:1;min-width:240px;">新規登録です。登録済みの生徒を選ぶと、いまの内容がフォームに入ります。</span>
+      <button type="button" class="btn btn-secondary" onclick="regResetForm()" style="font-size:12px;white-space:nowrap;">新規登録に戻す（フォームを空にする）</button>
     </div>
 
     <!-- STEPS -->
@@ -3971,6 +3984,9 @@ function _rowToStudent(row) {
     roadmapHtml: row.roadmap_html || null,
     timelineData: _parseJsonCol(row.timeline_data, null),
     strategySheet: _parseJsonCol(row.strategy_sheet, null),
+    memo: row.memo || '',
+    univName2: row.univ_name2 || '', univInfo2: _parseJsonCol(row.univ_info2, null), dept2: row.dept2 || '',
+    univName3: row.univ_name3 || '', univInfo3: _parseJsonCol(row.univ_info3, null), dept3: row.dept3 || '',
     updated_at: row.updated_at || null,
   };
 }
@@ -4004,6 +4020,9 @@ function _studentToRow(s) {
     roadmap_html: s.roadmapHtml || null,
     timeline_data: s.timelineData || null,
     strategy_sheet: s.strategySheet || null,
+    memo: s.memo || '',
+    univ_name2: s.univName2 || '', univ_info2: s.univInfo2 || null, dept2: s.dept2 || '',
+    univ_name3: s.univName3 || '', univ_info3: s.univInfo3 || null, dept3: s.dept3 || '',
     updated_at: new Date().toISOString(),
   };
   // ★ 過去にエラーになったカラムを事前除外（リトライ回数を減らす）
@@ -4028,7 +4047,8 @@ async function saveStudentToList(s, _silent) {
 
 async function _saveStudentToListInner(s, _silent) {
   // ① ローカルを即時更新してUIを描画
-  const existingIdx = _allStudents.findIndex(x => x.name === s.name);
+  let existingIdx = s._id ? _allStudents.findIndex(x => x._id === s._id) : -1;
+  if (existingIdx < 0) existingIdx = _allStudents.findIndex(x => x.name === s.name);
   if (existingIdx >= 0) {
     const prev = _allStudents[existingIdx];
     _allStudents[existingIdx] = Object.assign({}, s, {
@@ -4152,7 +4172,8 @@ function renderStudentList() {
         + '<div class="student-info">'
         + '<div class="student-name">' + s.name
         + '<span style="font-size:10px;font-weight:400;color:var(--text-muted);margin-left:8px;">ロードマップ ' + (s.roadmapCount||0) + '回</span>'
-        + '<button onclick="event.stopPropagation();deleteStudentFromList(\'' + dn + '\')" style="margin-left:8px;padding:2px 8px;font-size:10px;background:transparent;border:1px solid #e0c0b8;border-radius:4px;color:#c84b31;cursor:pointer;font-family:inherit;">削除</button></div>'
+        + '<button onclick="event.stopPropagation();regEditStudent(\'' + dn + '\')" style="margin-left:8px;padding:2px 8px;font-size:10px;background:transparent;border:1px solid var(--border);border-radius:4px;color:var(--ink);cursor:pointer;font-family:inherit;">編集</button>'
+        + '<button onclick="event.stopPropagation();deleteStudentFromList(\'' + dn + '\')" style="margin-left:6px;padding:2px 8px;font-size:10px;background:transparent;border:1px solid #e0c0b8;border-radius:4px;color:#c84b31;cursor:pointer;font-family:inherit;">削除</button></div>'
         + '<div class="student-meta">' + gl + ' / ' + sl + ' / 入塾：' + enrolled + '</div>'
         + '</div>'
         + '<div style="text-align:right;">'
@@ -4818,6 +4839,8 @@ function showPage(name) {
     renderStudentList();
   }
 
+  if (name === 'new-student' && typeof regFillSelect === 'function') { try { regFillSelect(); } catch (e) { } }
+
   // 個別合格ロードマップの描画
   if ((name === 'groad' || name === 'gweek') && window.GR) { try { GR.onShow(name); } catch (e) { console.warn('[GR] 表示エラー:', e); } }
 
@@ -4838,6 +4861,8 @@ function _switchToStudent(s, forceRender) {
   // 前の生徒のページを保存（DOM編集→データ同期も含む）
   _cacheSaveCurrentStudent(true);
   currentStudent = s;
+  // v1.2.2：確認テスト・月次テストなどページ共通の状態を、この生徒のデータに置き換える（前の生徒のデータが混ざらないように）
+  if (typeof _loadPageStateFromStudent === 'function') _loadPageStateFromStudent(s);
   // 生徒切替時に参考書データをクリア（前の生徒の手動追加書が混入するのを防止）
   window._roadmapBooksAll = null;
   window._currentRoadmapFilter = 'all';
@@ -5021,7 +5046,8 @@ function autoFillExamMonth() {
 }
 
 async function generateRoadmap() {
-  const name     = document.getElementById('f-name').value || '新規生徒';
+  const name     = (document.getElementById('f-name').value || '').trim() || '新規生徒';
+  if (typeof _regCheckName === 'function' && !_regCheckName(name)) return;
   const grade    = document.getElementById('f-grade').value;
   const stream   = document.getElementById('f-stream').value;
   const univ1    = document.getElementById('f-univ1').value || '東京大学';
@@ -5075,10 +5101,9 @@ async function generateRoadmap() {
 
   // 主要対策科目（チェックボックス）を収集
   const mainSubjects = [];
-  const subCheckIds = ['sub-eng-r','sub-eng-l','sub-math1a','sub-math2bc','sub-gendai','sub-kobun','sub-kanbun','sub-jpnhist','sub-wldhist','sub-geo','sub-civics','sub-sci-basic','sub-info'];
-  subCheckIds.forEach(function(id) {
-    const el = document.getElementById(id);
-    if (el && el.checked) mainSubjects.push(el.value);
+  // 画面にある主要対策科目のチェックをすべて集める（理系・文系どちらの科目構成でも保存できるように）
+  document.querySelectorAll('#main-subject-checks input[type="checkbox"]:checked').forEach(function(el) {
+    if (el.value && mainSubjects.indexOf(el.value) < 0) mainSubjects.push(el.value);
   });
 
   // 科目別偏差値を収集
@@ -5105,12 +5130,17 @@ async function generateRoadmap() {
   });
 
   // 既存生徒のタイムライン・アドバイスデータを引き継ぐ
-  var _existingStudent = _allStudents.find(function(x) { return x.name === name; });
-  var _newStudentObj = { name, grade, stream, univName, univInfo, dept1, levelVal, devVal, enrolled, months, goalYear, goalMonth,
+  // 既存の生徒（編集中の生徒、または同じ名前の生徒）のデータを引き継ぎ、フォームの内容で上書きする
+  // （戦略シート・確認テスト・月次テスト・偏差値履歴・手動で追加した参考書などが消えないように）
+  var _existingStudent = (typeof _regFindExisting === 'function') ? _regFindExisting(name) : _allStudents.find(function(x) { return x.name === name; });
+  var _prevStudentCopy = _existingStudent ? JSON.parse(JSON.stringify(_existingStudent)) : null;
+  var _newStudentObj = Object.assign({}, _existingStudent || {}, { name, grade, stream, univName, univInfo, dept1, levelVal, devVal, enrolled, months, goalYear, goalMonth,
     examMonth: examMonthInput || null,
     univName2, univInfo2, dept2, univName3, univInfo3, dept3, subDevs, mainSubjects,
+    memo: ((document.getElementById('f-memo') || {}).value || '').trim(),
     timelineData: _existingStudent ? _existingStudent.timelineData : null,
-    adviceData: _existingStudent ? _existingStudent.adviceData : null };
+    adviceData: _existingStudent ? _existingStudent.adviceData : null });
+  if (_existingStudent && _existingStudent._id) _newStudentObj._id = _existingStudent._id;
 
   // ① ロードマップ生成・表示（必ず実行）
   const loading = document.getElementById('loading');
@@ -5134,14 +5164,14 @@ async function generateRoadmap() {
         }
       }
       // ★ ロードマップ生成時のみroadmapCountをインクリメント
-      var _existingForCount = _allStudents.find(function(x) { return x.name === _newStudentObj.name; });
-      _newStudentObj.roadmapCount = (_existingForCount ? (_existingForCount.roadmapCount || 0) : 0) + 1;
+      _newStudentObj.roadmapCount = (_existingStudent ? (_existingStudent.roadmapCount || 0) : 0) + 1;
       await saveStudentToList(_newStudentObj);
       // Supabase保存後に_idをcurrentStudentにも反映
       var saved = _allStudents.find(function(x) { return x.name === _newStudentObj.name; });
       if (saved && saved._id && currentStudent && currentStudent.name === _newStudentObj.name) {
         currentStudent._id = saved._id;
       }
+      if (saved && saved.memo == null) saved.memo = _newStudentObj.memo;
     } catch(e) {
       console.error('保存エラー:', e);
       showToast('DB保存エラー: ' + e.message);
@@ -5149,6 +5179,7 @@ async function generateRoadmap() {
 
     renderStudentList();
     showToast('ロードマップを生成しました ✓');
+    if (typeof _regAfterSave === 'function') { try { _regAfterSave(_newStudentObj, _prevStudentCopy); } catch (e) { console.warn('[REG] 登録後の処理でエラー:', e); } }
   }, 1800);
 }
 
@@ -11875,6 +11906,158 @@ function ssEnter(){
 
 <script>
 /* ============================================================
+ * 生徒登録の補強（v1.2.2）
+ *  ・登録済みの生徒をフォームに読み込んで編集する（ダッシュボードの「編集」／登録画面のプルダウン）
+ *  ・登録し直しても、その生徒の他のデータ（戦略シート・確認テスト・月次テスト・偏差値履歴・手動参考書）を残す
+ *  ・主要対策科目のチェックと講師メモを保存する
+ *  ・登録（保存）の直後に個別合格ロードマップを自動で作る／既にあれば登録の変更を反映する
+ * ============================================================ */
+var _regEditing = null;   // 編集中の生徒 { _id, name }（新規登録のときは null）
+var REG_DEV_IDS = [['数学IA', 'dev-math1a'], ['数学IIB', 'dev-math2b'], ['数学IIIC', 'dev-math3c'], ['物理', 'dev-physics'], ['化学', 'dev-chemistry'], ['生物', 'dev-biology'], ['地学', 'dev-geology'],
+  ['英語R', 'dev-eng-r'], ['英語L', 'dev-eng-l'], ['現代文', 'dev-gendai'], ['古文', 'dev-kobun'], ['漢文', 'dev-kanbun'], ['情報', 'dev-info']];
+
+function _regEl(id) { return document.getElementById(id); }
+function _regSet(id, v) { var el = _regEl(id); if (el) el.value = (v == null ? '' : v); }
+function _regKey(s) { return s._id ? String(s._id) : 'name:' + s.name; }
+function _regPad2(n) { return (n < 10 ? '0' : '') + n; }
+
+// 登録画面のプルダウン（登録済みの生徒）
+function regFillSelect() {
+  var sel = _regEl('reg-edit-sel'); if (!sel) return;
+  var cur = _regEditing ? (_regEditing._id ? String(_regEditing._id) : 'name:' + _regEditing.name) : '';
+  sel.innerHTML = '<option value="">── 生徒を選択 ──</option>' + (_allStudents || []).map(function (s) {
+    var k = _regKey(s); return '<option value="' + k.replace(/"/g, '&quot;') + '"' + (k === cur ? ' selected' : '') + '>' + String(s.name).replace(/</g, '&lt;') + '</option>';
+  }).join('');
+  _regUpdateStatus();
+}
+function _regUpdateStatus() {
+  var st = _regEl('reg-edit-status'), btn = document.querySelector('button[onclick="generateRoadmap()"]');
+  if (st) st.innerHTML = _regEditing
+    ? '「<b>' + String(_regEditing.name).replace(/</g, '&lt;') + '</b>」さんの登録内容を編集しています。保存すると登録内容が上書きされます（戦略シート・確認テスト・合格ロードマップはそのまま残ります）。'
+    : '新規登録です。登録済みの生徒を選ぶと、いまの内容がフォームに入ります。';
+  if (btn) btn.innerHTML = _regEditing ? '<span>💾</span> 登録内容を保存してロードマップを更新' : '<span>🗺</span> ロードマップを自動生成する';
+}
+
+// ダッシュボードの「編集」から
+function regEditStudent(name) {
+  var s = (_allStudents || []).find(function (x) { return x.name === name; });
+  if (!s) { showToast('生徒データが見つかりません'); return; }
+  showPage('new-student');
+  regLoadStudent(_regKey(s));
+}
+
+// 登録済みの生徒をフォームに読み込む
+function regLoadStudent(key) {
+  if (!key) { regResetForm(); return; }
+  var s = (_allStudents || []).find(function (x) { return _regKey(x) === key; });
+  if (!s) return;
+  _regEditing = { _id: s._id || null, name: s.name };
+  _regSet('f-name', s.name);
+  _regSet('f-enrolled', s.enrolled || '');
+  var exam = s.examMonth || ((s.goalYear != null && s.goalMonth != null && s.goalYear !== '') ? s.goalYear + '-' + _regPad2(+s.goalMonth + 1) : '');
+  _regSet('f-exam-month', exam);
+  _regSet('f-grade', s.grade || 'high3');
+  _regSet('f-stream', s.stream || 'rikei');
+  _regFillUniv(1, s.univName, s.univInfo, s.dept1);
+  _regFillUniv(2, s.univName2, s.univInfo2, s.dept2);
+  _regFillUniv(3, s.univName3, s.univInfo3, s.dept3);
+  _regSet('f-level', s.levelVal || 2);
+  _regSet('f-deviation', s.devVal || '');
+  var main = Array.isArray(s.mainSubjects) ? s.mainSubjects : [];
+  document.querySelectorAll('#main-subject-checks input[type="checkbox"]').forEach(function (cb) { cb.checked = main.indexOf(cb.value) >= 0; try { updateSubCheckStyle(cb); } catch (e) { } });
+  var sd = s.subDevs || {};
+  REG_DEV_IDS.forEach(function (x) { _regSet(x[1], sd[x[0]] != null ? sd[x[0]] : ''); });
+  _regSet('f-memo', s.memo || '');
+  for (var i = 1; i <= 4; i++) { var st = _regEl('step-' + i); if (st) { st.classList.remove('active', 'done'); if (i === 1) st.classList.add('active'); } }
+  regFillSelect();
+  var sel = _regEl('reg-edit-sel'); if (sel) sel.value = key;
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+function _regFillUniv(idx, name, info, dept) {
+  var inp = _regEl('f-univ' + idx); if (!inp) return;
+  inp.value = name || '';
+  delete _univCustom[idx]; delete _selectedUniv[idx];
+  _regSet('f-univ' + idx + '-dev-override', ''); _regSet('f-univ' + idx + '-unknown-dev', ''); _regSet('f-univ' + idx + '-unknown-subjects', '');
+  var manualWrap = _regEl('univ-manual-dev-wrap-' + idx), unknownWrap = _regEl('univ-unknown-wrap-' + idx), result = _regEl('univ-result-' + idx);
+  if (!name) { if (result) result.classList.remove('show'); if (manualWrap) manualWrap.style.display = 'none'; if (unknownWrap) unknownWrap.style.display = 'none'; updateDeptSelect(idx, ''); return; }
+  var base = UNIV_DB[name];
+  if (base) {
+    searchUniv(idx, name);
+    if (info && info.dev && +info.dev !== +base.dev) { _regSet('f-univ' + idx + '-dev-override', info.dev); applyDevOverride(idx); }
+  } else {
+    // 大学データにない大学：登録されている偏差値・科目・種別をそのまま入れる
+    _regSet('f-univ' + idx + '-unknown-dev', info && info.dev ? info.dev : '');
+    _regSet('f-univ' + idx + '-unknown-subjects', (info && Array.isArray(info.subjects) ? info.subjects : []).join(', '));
+    _regSet('f-univ' + idx + '-unknown-cat', (info && info.cat) || 'private');
+    if (manualWrap) manualWrap.style.display = 'none';
+    if (unknownWrap) unknownWrap.style.display = 'block';
+    var sg = _regEl('univ-suggest-' + idx); if (sg) sg.style.display = 'none';
+    applyUnknownUniv(idx);
+    updateDeptSelect(idx, name);
+  }
+  var dsel = _regEl('f-dept' + idx);
+  if (!dsel) return;
+  if (dsel.tagName === 'SELECT') {
+    var has = Array.prototype.some.call(dsel.options, function (o) { return o.value === dept; });
+    if (dept && has) dsel.value = dept;
+    else if (dept) { switchDeptToText(idx); _regSet('f-dept' + idx, dept); }
+  } else dsel.value = dept || '';
+}
+// フォームを空にして新規登録に戻す
+function regResetForm() {
+  _regEditing = null;
+  _regSet('f-name', ''); _regSet('f-enrolled', ''); _regSet('f-memo', ''); _regSet('f-deviation', '');
+  _regSet('f-grade', 'high3'); _regSet('f-stream', 'rikei'); _regSet('f-level', '2');
+  try { autoFillExamMonth(); } catch (e) { }
+  [1, 2, 3].forEach(function (i) { _regFillUniv(i, '', null, ''); });
+  document.querySelectorAll('#main-subject-checks input[type="checkbox"]').forEach(function (cb) { cb.checked = false; try { updateSubCheckStyle(cb); } catch (e) { } });
+  REG_DEV_IDS.forEach(function (x) { _regSet(x[1], ''); });
+  for (var i = 1; i <= 4; i++) { var st = _regEl('step-' + i); if (st) { st.classList.remove('active', 'done'); if (i === 1) st.classList.add('active'); } }
+  regFillSelect();
+  var sel = _regEl('reg-edit-sel'); if (sel) sel.value = '';
+}
+// 保存前の名前チェック：編集中に別の生徒と同じ名前にしようとしていないか
+function _regCheckName(name) {
+  var dup = (_allStudents || []).find(function (x) { return x.name === name && (!_regEditing || (x._id ? x._id !== _regEditing._id : x.name !== _regEditing.name)); });
+  if (_regEditing && dup) { showToast('同じ名前の生徒「' + name + '」がすでに登録されています。名前を変えてください'); return false; }
+  return true;
+}
+// 登録し直し・編集のときに引き継ぐ元の生徒データ
+function _regFindExisting(name) {
+  var list = _allStudents || [];
+  if (_regEditing) {
+    var hit = _regEditing._id ? list.find(function (x) { return x._id === _regEditing._id; }) : list.find(function (x) { return x.name === _regEditing.name; });
+    if (hit) return hit;
+  }
+  return list.find(function (x) { return x.name === name; }) || null;
+}
+// 保存のあと：編集状態を解除し、個別合格ロードマップを作成／更新する
+function _regAfterSave(saved, prev) {
+  _regEditing = null;
+  try { regFillSelect(); } catch (e) { }
+  if (window.GR && typeof GR.onStudentRegistered === 'function') {
+    try { GR.onStudentRegistered(prev); } catch (e) { console.warn('[GR] 登録後の処理でエラー:', e); }
+  }
+}
+
+// 生徒を切り替えるとき：確認テスト・月次テストなどページ共通の状態を、その生徒のデータで置き換える
+// （前に表示していた生徒のデータが、次の生徒の保存に混ざらないように）
+function _loadPageStateFromStudent(s) {
+  try {
+    var cp = function (v, d) { return (v && typeof v === 'object') ? JSON.parse(JSON.stringify(v)) : d; };
+    testData = cp(s.testData, {});
+    testAnswerVisible = {};
+    currentTestWeek = null;
+    monthlyScores = cp(s.monthlyScores, {});
+    monthlyTestData = s.monthlyTestData ? cp(s.monthlyTestData, null) : null;
+    monthlyAnsVisible = false;
+    if (Array.isArray(s.manualBooks)) s.manualBooks.forEach(function (b) { if (b && typeof b === 'object' && b._manual == null) b._manual = true; });
+  } catch (e) { console.warn('[REG] 生徒データの読み込みでエラー:', e); }
+}
+
+</script>
+<script>
+/* ============================================================
  * 個別合格ロードマップ（GR）モジュール — 戦略管理システム v1.2.1
  * 「GALILEO｜個別合格ロードマップ システム開発構想書」のMVPを実装。
  *   ・「合格ロードマップ」タブ：合格戦略／教材・年間計画／月間ロードマップ／到達度
@@ -11993,7 +12176,7 @@ function ssEnter(){
     saveTimer: null, cloudTimer: null, retryTimer: null, pendingCloud: false, loadSeq: 0,
     // baseJson/baseAt：この画面の計画のもとになっている「クラウド上の版」（同時編集のマージに使う）
     baseJson: null, baseAt: null, busy: false, pushQueued: false, conflicts: 0, lastCheck: 0, lastSent: null,
-    renderPending: false, keepForm: false, pointerAt: 0,
+    renderPending: false, keepForm: false, pointerAt: 0, autoCreate: false, syncFrom: null,
     lsFailed: false
   };
   try { var _ui = JSON.parse(localStorage.getItem(LS_UI) || 'null'); if (_ui && _ui.tab) { S.tab.groad = _ui.tab.groad || S.tab.groad; S.tab.gweek = _ui.tab.gweek || S.tab.gweek; } } catch (e) { }
@@ -12161,6 +12344,7 @@ function ssEnter(){
     }).then(function () {
       if (S.busy === tok) S.busy = false;
       if (seq !== S.loadSeq) return;
+      if (S.autoCreate) { try { finishAutoCreate(); } catch (e) { console.warn('[GR] 自動作成エラー:', e); } }
       afterBusy(); renderStatus();
     });
   }
@@ -12422,7 +12606,7 @@ function ssEnter(){
 
   /* ---------- 計画データの作成・補完 ---------- */
   function emptyProfile() {
-    return { school: '', altUnivs: '', examType: '', examSubjects: '', examDate: '', hoursWeekday: '', hoursHoliday: '', teacher: '', goalText: '',
+    return { school: '', altUnivs: '', examType: '', examSubjects: '', examDate: '', hoursWeekday: '', hoursHoliday: '', teacher: '', goalText: '', memo: '',
       commonRatio: '', secondRatio: '', weights: [], priorities: [], policies: [], strengths: [], weaknesses: [], issues: [], targets: {}, currents: {} };
   }
   function migrate(p) {
@@ -12501,23 +12685,58 @@ function ssEnter(){
     });
     return out;
   }
-  function createPlanFor(st) {
-    var subjects = deriveSubjects(st);
-    var currents = {}, targets = {};
+  // 生徒登録の情報から決まる値（作成時に取り込み、登録内容が変わったときは「手で直していなければ」追随させる）
+  function derivedFrom(st) {
+    var subjects = deriveSubjects(st), currents = {}, targets = {};
     var sd = st.subDevs || {};
     Object.keys(sd).forEach(function (k) { var n = normSubject(k), v = num(sd[k]); if (v == null || !n) return; currents[n] = currents[n] == null ? v : Math.round((currents[n] + v) / 2); });
     var tdev = st.univInfo && num(st.univInfo.dev);
     if (tdev) subjects.forEach(function (s) { targets[s] = tdev; });
-    var prof = emptyProfile();
-    prof.altUnivs = [st.univName2, st.univName3].filter(Boolean).join('・');
-    prof.examSubjects = (st.univInfo && Array.isArray(st.univInfo.subjects)) ? st.univInfo.subjects.join('・') : '';
+    var exam = (st.univInfo && Array.isArray(st.univInfo.subjects) && st.univInfo.subjects.length) ? st.univInfo.subjects.join('・')
+      : sortSubjects((st.mainSubjects || []).map(normSubject)).join('・');
+    return { subjects: subjects, currents: currents, targets: targets, altUnivs: [st.univName2, st.univName3].filter(Boolean).join('・'), examSubjects: exam, memo: String(st.memo || '') };
+  }
+  function createPlanFor(st) {
+    var d = derivedFrom(st), prof = emptyProfile();
+    prof.altUnivs = d.altUnivs; prof.examSubjects = d.examSubjects; prof.memo = d.memo;
     prof.priorities = [{ id: uid('row'), title: '', desc: '' }];
-    prof.targets = targets; prof.currents = currents;
+    prof.targets = d.targets; prof.currents = d.currents;
     return migrate({
       v: PLAN_VERSION, createdAt: nowIso(), updatedAt: '', updatedBy: '',
-      profile: prof, subjects: subjects, materials: booksToMaterials(st.manualBooks),
+      profile: prof, subjects: d.subjects, materials: booksToMaterials(st.manualBooks),
       stages: autoStages(thisMonth(), examMonthOf(st)), events: [], months: {}, tasks: [], reviews: [], mocks: [], history: []
     });
+  }
+  // 生徒登録が変わったとき：作成時に取り込んだままの値（手で直していない値）だけを新しい登録内容に合わせる。科目は増やすだけで減らさない
+  function syncFromStudent(prev, now) {
+    if (!S.plan || !prev || !now) return 0;
+    var a = derivedFrom(prev), b = derivedFrom(now), prof = S.plan.profile, n = 0;
+    function follow(key) { var cur = prof[key] == null ? '' : String(prof[key]); if (a[key] !== b[key] && (cur === '' || cur === a[key])) { prof[key] = b[key]; n++; } }
+    follow('altUnivs'); follow('examSubjects'); follow('memo');
+    ['targets', 'currents'].forEach(function (k) {
+      prof[k] = prof[k] || {};
+      Object.keys(b[k]).forEach(function (s) { if (b[k][s] !== a[k][s] && (prof[k][s] == null || prof[k][s] === a[k][s])) { prof[k][s] = b[k][s]; n++; } });
+    });
+    b.subjects.forEach(function (s) { if (S.plan.subjects.indexOf(s) < 0) { S.plan.subjects = sortSubjects(S.plan.subjects.concat([s])); n++; } });
+    if (n) touch();
+    return n;
+  }
+  // 生徒登録の直後：計画がなければ自動で作る（クラウドの読み込みが終わってから判断する）
+  function finishAutoCreate() {
+    if (!S.autoCreate) return;
+    S.autoCreate = false;
+    var prev = S.syncFrom; S.syncFrom = null;
+    if (!S.student) return;
+    if (!S.plan) {
+      S.plan = createPlanFor(S.student);
+      addHistory('個別ロードマップ', '', '新規作成（生徒登録から自動作成）', '', '');
+      touch(); saveLocalNow(); S.tab.groad = 'strategy'; saveUi();
+      toast('個別ロードマップを作成しました。合格戦略と教材を入力してください');
+    } else if (prev) {
+      var n = syncFromStudent(prev, S.student);
+      if (n) toast('生徒登録の変更をロードマップに反映しました');
+    }
+    rerender();
   }
 
   /* ---------- 教材の範囲を日ごとに割り振る（年→月→週→日の共通の土台） ----------
@@ -12870,7 +13089,7 @@ function ssEnter(){
       + kv('学習可能時間', '<div class="gr-row-inline" style="font-size:12px">平日' + inp('profile.hoursWeekday', { type: 'number', cls: 'w60', min: 0, step: 0.5 }) + '時間　休日' + inp('profile.hoursHoliday', { type: 'number', cls: 'w60', min: 0, step: 0.5 }) + '時間</div>')
       + kv('担当講師', inp('profile.teacher', { ph: '山田 先生' }))
       + '</div><div class="gr-flabel" style="margin-top:12px">対象科目</div>' + subjectChips()
-      + '<div class="gr-note">氏名・学年・志望校・入試時期は「生徒登録」の情報を表示しています。</div>';
+      + '<div class="gr-note">氏名・学年・志望校・入試時期は「生徒登録」の情報を表示しています。対象科目は登録時の主要対策科目と科目別偏差値から作り、受験科目は大学データの科目を入れています（必要に応じて書き換えてください）。</div>';
 
     var w = prof.weights || [];
     var wTotal = w.reduce(function (a, r) { return a + (num(r.points) || 0); }, 0);
@@ -12912,6 +13131,7 @@ function ssEnter(){
       + '<div class="gr-grid gr-grid-2">' + card('本人の目標・意気込み', ta('profile.goalText', { rows: 4, ph: '東京科学大学に合格して、将来は環境・エネルギー分野の研究をしたい。' })) + card('学習方針', listEditor('profile.policies', { marker: 'check', ph: '模試結果をもとに計画を柔軟に修正する' })) + '</div>'
       + '<div class="gr-grid gr-grid-21">' + card('現在の学習状況（模試結果）', mocksEditor(), { h: 'blue' }) + card('得意・不得意分野', swCard) + '</div>'
       + '<div class="gr-grid gr-grid-2">' + card('学習時間の実績（直近4週）', studyTimeChart()) + card('今後の課題と対策', tableEditor('profile.issues', [{ key: 'issue', label: '課題', w: '36%', ph: '数学の基礎定着' }, { key: 'action', label: '具体的な対策', type: 'textarea', ph: '教科書の例題を完璧にし、基礎問題集を2周する' }], { tpl: { issue: '', action: '' } })) + '</div>'
+      + card('講師メモ（入塾時の特記事項・申し送り）', ta('profile.memo', { rows: 3, ph: '入塾時の特記事項や学習上の課題、家庭との共有事項など' }) + '<div class="gr-note">「生徒登録」の講師メモを作成時に取り込みます。ここで書き換えた内容はロードマップにだけ残ります。</div>')
       + (document.getElementById('page-roadmap') ? '<div class="gr-noprint" style="text-align:right;margin-top:-4px"><button class="gr-link" data-gr-act="legacy" title="置き換え前の画面です。偏差値ギャップ分析・AIによる戦略分析・参考書ルートを確認できます">以前のロードマップ画面（AI戦略分析・参考書ルート）を開く</button></div>' : '');
   }
   function subjectChips() {
@@ -13021,11 +13241,31 @@ function ssEnter(){
     var rows = '<div class="gr-g-row"><div class="gr-g-label"><b>学習段階</b></div><div class="gr-g-track">' + gl + tl + p.stages.map(function (s) {
       return (s.start && s.end) ? bar(pos(s.start, false), pos(s.end, true), 'stage', s.color || '#e3efe9', s.label || '', s.label + '：' + periodLabel(s.start, s.end)) : '';
     }).join('') + '</div></div>';
-    var evs = p.events.filter(function (e) { return e.date; });
-    if (evs.length) rows += '<div class="gr-g-row"><div class="gr-g-label"><b>模試・節目</b></div><div class="gr-g-track">' + gl + tl + evs.map(function (e) {
-      var x = pos(e.date.slice(0, 7) + '-15', false); if (x <= 0 || x >= N) return '';
-      return '<div class="gr-g-ev" style="left:' + (x / N * 100) + '%;max-width:' + (100 / N) + '%;' + (e.kind === '模試' ? '' : 'background:var(--teal)') + '" title="' + esc(e.kind + '：' + e.label) + '">' + esc(e.label || e.kind) + '</div>';
-    }).join('') + '</div></div>';
+    var evs = p.events.filter(function (e) { return e.date; }).slice().sort(function (a, b) { return a.date < b.date ? -1 : a.date > b.date ? 1 : 0; });
+    if (evs.length) {
+      // 模試・節目の名前は、隣の節目と重ならない範囲で横に伸ばし、入りきらなければ2段目に置く（それでも足りなければ「…」で省略）
+      var trackEl = document.querySelector('.gr-gantt .gr-g-track'), pxPerUnit = ((trackEl && trackEl.clientWidth) || 900) / N;
+      var lanes = [[], []], evHtml = '';
+      function free(lane, a, b) { return !lanes[lane].some(function (iv) { return a < iv[1] && b > iv[0]; }); }
+      function clip(lane, x, w, toLeft) {
+        var lim = toLeft ? 0 : N;
+        lanes[lane].forEach(function (iv) { if (toLeft) { if (iv[1] <= x + 0.001) lim = Math.max(lim, iv[1]); } else { if (iv[0] >= x - 0.001) lim = Math.min(lim, iv[0]); } });
+        return Math.max(0.6, Math.min(w, (toLeft ? x - lim : lim - x) - 0.08));
+      }
+      evs.forEach(function (e) {
+        var x = pos(e.date.slice(0, 7) + '-15', false); if (x <= 0 || x >= N) return;
+        var text = e.label || e.kind, w = Math.min(N * 0.6, (text.length * 10.5 + 26) / pxPerUnit);
+        var toLeft = x + w > N && x - w >= 0;
+        var a = toLeft ? x - w : x, b = toLeft ? x : x + w;
+        var lane = free(0, a, b) ? 0 : free(1, a, b) ? 1 : (free(0, toLeft ? x - 0.6 : x, toLeft ? x : x + 0.6) ? 0 : 1);
+        w = clip(lane, x, w, toLeft);
+        lanes[lane].push(toLeft ? [x - w, x] : [x, x + w]);
+        var pos$ = toLeft ? 'right:' + ((N - x) / N * 100) + '%;' : 'left:' + (x / N * 100) + '%;';
+        evHtml += '<i class="gr-g-evdot' + (lane ? ' l1' : '') + '" style="left:' + (x / N * 100) + '%"></i>'
+          + '<div class="gr-g-ev' + (lane ? ' l1' : '') + (toLeft ? ' tl' : '') + '" style="' + pos$ + 'max-width:' + (w / N * 100) + '%;' + (e.kind === '模試' ? '' : 'background:var(--teal)') + '" title="' + esc(e.kind + '：' + e.label) + '">' + esc(text) + '</div>';
+      });
+      rows += '<div class="gr-g-row"><div class="gr-g-label"><b>模試・節目</b></div><div class="gr-g-track"' + (lanes[1].length ? ' style="min-height:54px"' : '') + '>' + gl + tl + evHtml + '</div></div>';
+    }
     planSubjects().concat(['']).forEach(function (sub) {
       var ms = sortedMaterials().filter(function (m) { return (m.subject || '') === sub && m.start && m.end; });
       if (!ms.length) return;
@@ -13995,10 +14235,17 @@ function ssEnter(){
   window.GR = {
     onShow: function (pg) { S.page = pg; render(); checkRemote(true); },
     onStudentChanged: function () { ensureLoaded(); render(); },
+    // 生徒登録の保存直後に呼ぶ：計画がなければ自動作成、あれば登録の変更（志望校・偏差値・併願校・メモ）を反映する
+    onStudentRegistered: function (prev) {
+      S.autoCreate = true; S.syncFrom = prev || null;
+      ensureLoaded();
+      if (!S.busy) finishAutoCreate();
+      render();
+    },
     flush: flush,
     render: render,
     _debug: { state: S, alloc: alloc, computeAlloc: computeAlloc, matStats: matStats, subjectStats: subjectStats, genWeek: genWeek, autoStages: autoStages, createPlanFor: createPlanFor,
-      mergePlans: mergePlans, normalizePlan: normalizePlan, migrate: migrate, checkRemote: checkRemote, pushCloud: pushCloud }
+      mergePlans: mergePlans, normalizePlan: normalizePlan, migrate: migrate, checkRemote: checkRemote, pushCloud: pushCloud, derivedFrom: derivedFrom, syncFromStudent: syncFromStudent }
   };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 })();
