@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ガリレオ 戦略管理システム v1.2.4</title>
+<title>ガリレオ 戦略管理システム v1.2.5</title>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@400;600;700&family=Noto+Sans+JP:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.3/dist/umd/supabase.min.js"></script>
@@ -1140,7 +1140,7 @@
       </div>
       <div>
         <div class="logo-text">ガリレオ 理系大学受験 戦略管理システム</div>
-        <span class="logo-sub">GALILEO SCIENCE EXAM STRATEGY — v1.2.4</span>
+        <span class="logo-sub">GALILEO SCIENCE EXAM STRATEGY — v1.2.5</span>
       </div>
     </div>
   </div>
@@ -1149,9 +1149,9 @@
     <button class="nav-btn" onclick="showPage('new-student')">生徒登録</button>
     <button class="nav-btn" onclick="showPage('groad')">合格ロードマップ</button>
     <button class="nav-btn" onclick="showPage('gweek')">週間・毎日課題</button>
-    <button class="nav-btn" onclick="showPage('tests')">確認テスト</button>
-    <button class="nav-btn" onclick="showPage('monthly')">実力診断</button>
-    <button class="nav-btn" onclick="showPage('prediction')">推移予測</button>
+    <button class="nav-btn" onclick="showPage('tests')" style="display:none" data-retired="1">確認テスト</button>
+    <button class="nav-btn" onclick="showPage('monthly')" style="display:none" data-retired="1">実力診断</button>
+    <button class="nav-btn" onclick="showPage('prediction')" style="display:none" data-retired="1">推移予測</button>
     <button class="nav-btn" onclick="showPage('strategy-sheet')">戦略シート</button>
     <div style="display:flex;align-items:center;gap:6px;padding-right:12px;">
     <span id="db-status-indicator" title="データベース接続状態" style="font-size:11px;margin-right:12px;cursor:help;">
@@ -4156,22 +4156,9 @@ function renderStudentList() {
       var enrolled = s.enrolled ? s.enrolled.replace('-', '年') + '月' : '—';
       var dn = s.name.replace(/'/g, "\\'");
 
-      // 推移実績の最新値を取得
+      // v1.2.5：直近の模試は個別合格ロードマップの模試結果から表示
       var trendHtml = '';
-      var h = s.devHistory || {};
-      var hKeys = Object.keys(h).sort();
-      if (hKeys.length > 0) {
-        var latestKey = hKeys[hKeys.length - 1];
-        var latestDev = h[latestKey];
-        var change = latestDev - (s.devVal || 0);
-        var changeColor = change > 0 ? '#2a7f6f' : change < 0 ? '#c84b31' : '#6b6b80';
-        var ym = latestKey.split('-');
-        var labelM = parseInt(ym[1]) + '月';
-        trendHtml = '<div style="font-size:10px;margin-top:3px;color:' + changeColor + ';font-weight:600;">'
-          + '📈 直近実績 ' + latestDev + '（' + (change >= 0 ? '+' : '') + change + '）'
-          + '<span style="color:var(--text-muted);font-weight:400;margin-left:4px;">' + labelM + '時点・' + hKeys.length + '件記録</span>'
-          + '</div>';
-      }
+      try { if (window.GR && GR.mockTrendHtml) trendHtml = GR.mockTrendHtml(s) || ''; } catch (e) { }
 
       return '<div class="student-row" onclick="loadStudentFromList(\'' + dn + '\')">'
         + '<div class="student-avatar">' + av + '</div>'
@@ -4824,6 +4811,9 @@ function showPage(name) {
   // v1.2：旧「ロードマップ」「1ヶ月プラン」は個別合格ロードマップに置き換え（旧ページは非表示のまま残す）
   if (name === 'roadmap') name = 'groad';
   if (name === 'weekly-plan') name = 'gweek';
+  // v1.2.5：確認テストは週間・毎日課題へ、実力診断・推移予測は合格ロードマップへ（旧ページは残すがナビからは外す）
+  if (name === 'tests') name = 'gweek';
+  if (name === 'monthly' || name === 'prediction') name = 'groad';
   // ページ遷移前にキャッシュ保存（グラフは破棄しない）
   _cacheSaveCurrentStudent(false);
 
@@ -11666,7 +11656,7 @@ function ssSelectStudent(name){
 var SS_SUBMAP={eng:'英語',en:'英語',english:'英語',math:'数学',ma:'数学',phys:'物理',phy:'物理',physics:'物理',chem:'化学',che:'化学',chemistry:'化学',bio:'生物',biology:'生物',jpn:'国語',jp:'国語',kokugo:'国語',japanese:'国語',info:'情報',geo:'地理',soc:'社会'};
 function ssApplyStudent(){
   if(typeof currentStudent==='undefined'||!currentStudent||_ssKey==='__scratch'){ ssToast('生徒を選択してください'); return; }
-  ssConfirm('選択中の生徒「'+ssEsc(currentStudent.name)+'」の登録データ（氏名・学年・志望校・偏差値など）をシートに反映します。<br>該当する欄は上書きされます。よろしいですか？', function(){
+  ssConfirm('選択中の生徒「'+ssEsc(currentStudent.name)+'」の登録データ（氏名・学年・志望校・偏差値など）と、個別合格ロードマップの内容（合格戦略・配点・教材・学習段階・模試結果）をシートに反映します。<br>該当する欄は上書きされます。よろしいですか？', function(){
     ssSyncAll();
     var s=currentStudent;
     var gradeLabel={high1:'高1',high2:'高2',high3:'高3',ronin:'浪人'};
@@ -11706,8 +11696,11 @@ function ssApplyStudent(){
       });
       if(hr.length) ssData.mock.rows=hr;
     }
-    ssRender(); ssSave(false);
-    ssToast('生徒データを反映しました。細部は直接編集で調整してください');
+    var _ssDone=function(withPlan){ ssRender(); ssSave(false); ssToast(withPlan?'生徒データとロードマップの内容を反映しました。細部は直接編集で調整してください':'生徒データを反映しました（ロードマップは未作成）。細部は直接編集で調整してください'); };
+    if(window.GR && GR.sheetDataAsync){
+      ssToast('ロードマップの内容を読み込んでいます…');
+      GR.sheetDataAsync(s).then(function(sd){ var ok=false; if(sd){ try{ ssApplyRoadmap(sd); ok=true; }catch(e){ console.warn('[SS] ロードマップ反映エラー', e); } } _ssDone(ok); }).catch(function(){ _ssDone(false); });
+    } else _ssDone(false);
   });
 }
 function ssResetSample(){
@@ -12064,6 +12057,28 @@ function _loadPageStateFromStudent(s) {
     monthlyAnsVisible = false;
     if (Array.isArray(s.manualBooks)) s.manualBooks.forEach(function (b) { if (b && typeof b === 'object' && b._manual == null) b._manual = true; });
   } catch (e) { console.warn('[REG] 生徒データの読み込みでエラー:', e); }
+}
+
+// 合格戦略シートに、個別合格ロードマップから組み立てた内容（GR.sheetDataAsync の結果）を流し込む
+function ssApplyRoadmap(sd) {
+  if (!sd || typeof ssData === 'undefined' || !ssData) return;
+  function setRow(key, val) { if (val == null || val === '') return; var r = ssData.profile.rows.find(function (x) { return x[0] === key; }); if (r) r[1] = String(val); else ssData.profile.rows.push([key, String(val)]); }
+  (sd.profileRows || []).forEach(function (r) { setRow(r[0], r[1]); });
+  if (sd.goal) ssData.profile.goal = sd.goal;
+  if (sd.exam) {
+    if (sd.exam.univ) ssData.profile.exam.univ = sd.exam.univ;
+    if (sd.exam.v1) ssData.profile.exam.v1 = sd.exam.v1;
+    if (sd.exam.v2) ssData.profile.exam.v2 = sd.exam.v2;
+    if (sd.exam.rows && sd.exam.rows.length) { ssData.profile.exam.rows = sd.exam.rows; ssData.profile.exam.total = sd.exam.total; }
+  }
+  if (sd.chart && sd.chart.length) ssData.strategy.chart.rows = sd.chart;
+  if (sd.legendCur) ssData.strategy.chart.legendCur = sd.legendCur;
+  if (sd.legendTgt) ssData.strategy.chart.legendTgt = sd.legendTgt;
+  if (sd.policies && sd.policies.length) ssData.strategy.policies = sd.policies;
+  if (sd.priorities && sd.priorities.length) ssData.strategy.priorities = sd.priorities;
+  if (sd.milestones && sd.milestones.length) ssData.strategy.milestones = sd.milestones;
+  if (sd.materials && sd.materials.length) ssData.materials.rows = sd.materials;
+  if (sd.mocks && sd.mocks.rows && sd.mocks.rows.length) { ssData.mock.header = sd.mocks.header; ssData.mock.rows = sd.mocks.rows; }
 }
 
 </script>
@@ -13732,6 +13747,107 @@ function _loadPageStateFromStudent(s) {
   }
 
   /* ============================================================
+   * 他の画面との連携（v1.2.5）
+   *  ・ダッシュボードの生徒一覧：ロードマップの模試結果から「直近の模試」を表示
+   *  ・合格戦略シート：「生徒データから反映」でロードマップの内容（戦略・配点・教材・段階・模試）も取り込む
+   * ============================================================ */
+  // その生徒の計画：表示中ならその計画、なければこの端末の保存分
+  function planFor(st) {
+    if (!st) return null;
+    var key = studentKey(st);
+    if (key && key === S.sid && S.plan) return S.plan;
+    var local = key ? lsGet(key) : null;
+    return local ? migrate(local) : null;
+  }
+  // 計画をクラウドからも探す（戦略シートへの反映用）
+  function planForAsync(st) {
+    var p = planFor(st);
+    if (p || !cloudFor(st)) return Promise.resolve(p);
+    return cloudGet(studentKey(st)).then(function (r) { return (r && r.row && r.row.plan) ? migrate(r.row.plan) : null; }).catch(function () { return null; });
+  }
+  function mocksSorted(list) {
+    return (list || []).filter(function (m) { return m && m.month; }).slice().sort(function (a, b) { return a.month < b.month ? -1 : a.month > b.month ? 1 : 0; });
+  }
+  // ダッシュボード用：全生徒の模試結果だけをまとめて取り寄せる（60秒に1回まで）
+  S.dash = { at: 0, busy: false, mocks: {} };
+  function prefetchMocks() {
+    if (!cloudEnabled()) return;
+    var now = Date.now();
+    if (S.dash.busy || now - S.dash.at < 60000) return;
+    S.dash.busy = true; S.dash.at = now;
+    fetchT(SUPABASE_URL + '/rest/v1/' + TABLE + '?select=student_id,mocks:plan->mocks', { headers: sbHeaders() }).then(function (res) { return res.ok ? res.json() : []; }).then(function (rows) {
+      var changed = false;
+      (rows || []).forEach(function (row) { var j = JSON.stringify(row.mocks || []); if (S.dash.mocks[row.student_id] !== j) { S.dash.mocks[row.student_id] = j; changed = true; } });
+      S.dash.busy = false;
+      var pg = document.getElementById('page-dashboard');
+      if (changed && pg && pg.classList.contains('active') && typeof renderStudentList === 'function') { try { renderStudentList(); } catch (e) { } }
+    }).catch(function () { S.dash.busy = false; });
+  }
+  function mocksFor(st) {
+    var p = planFor(st);
+    if (p) return mocksSorted(p.mocks);
+    var j = st && st._id && S.dash.mocks[String(st._id)];
+    if (j) { try { return mocksSorted(JSON.parse(j)); } catch (e) { } }
+    return [];
+  }
+  // 生徒一覧の1行に出す「直近の模試」
+  function mockTrendHtml(st) {
+    try { prefetchMocks(); } catch (e) { }
+    var list = mocksFor(st);
+    if (!list.length) return '';
+    var last = list[list.length - 1], prev = list[list.length - 2];
+    var subs = sortSubjects(Object.keys(last.devs || {}).filter(function (k) { return num(last.devs[k]) != null; }));
+    if (!subs.length && !last.judge) return '';
+    var parts = subs.map(function (k) {
+      var v = num(last.devs[k]), d = prev ? num(prev.devs && prev.devs[k]) : null, diff = d != null ? v - d : null;
+      var col = diff > 0 ? '#2a7f6f' : diff < 0 ? '#c84b31' : '#6b6b80';
+      return esc(k) + v + (diff != null ? '<span style="color:' + col + ';font-weight:600">（' + (diff > 0 ? '+' : '') + diff + '）</span>' : '');
+    });
+    return '<div style="font-size:10px;margin-top:3px;color:var(--ink);font-weight:600;">📈 直近の模試 ' + esc(monthLabel(last.month)) + (last.name ? ' ' + esc(last.name) : '') + '：' + parts.join('・') + (last.judge ? '　判定' + esc(last.judge) : '')
+      + '<span style="color:var(--text-muted);font-weight:400;margin-left:4px;">' + list.length + '回記録（合格ロードマップ）</span></div>';
+  }
+  // 合格戦略シートに流し込む内容を、計画から組み立てる
+  function sheetDataFrom(st, p) {
+    if (!p) return null;
+    var prof = p.profile || {}, subs = (p.subjects || []).slice(), mocks = mocksSorted(p.mocks), last = mocks[mocks.length - 1];
+    var cur = prof.currents || {}, tgt = prof.targets || {};
+    var rows = [];
+    if (prof.school) rows.push(['高校', prof.school]);
+    if (prof.altUnivs) rows.push(['併願校', prof.altUnivs]);
+    if (prof.examType) rows.push(['入試方式', prof.examType]);
+    if (prof.examSubjects) rows.push(['受験科目', prof.examSubjects]);
+    var curSubs = subs.filter(function (k) { return num(cur[k]) != null; });
+    if (curSubs.length) rows.push(['現状の学力', '模試偏差値' + (last ? '（' + monthShort(last.month) + '）' : '') + '：' + curSubs.map(function (k) { return k + num(cur[k]); }).join(' / ')]);
+    if (num(prof.hoursWeekday) != null || num(prof.hoursHoliday) != null) rows.push(['学習可能時間', '平日 ' + (num(prof.hoursWeekday) != null ? prof.hoursWeekday : '—') + '時間　土日 ' + (num(prof.hoursHoliday) != null ? prof.hoursHoliday : '—') + '時間']);
+    if (prof.teacher) rows.push(['担当講師', prof.teacher]);
+    var weights = (prof.weights || []).filter(function (w) { return w && w.subject && num(w.points) != null; });
+    var total = weights.reduce(function (a, w) { return a + num(w.points); }, 0);
+    var exam = { univ: (st.univName || '') + (st.dept1 ? ' ' + st.dept1 : ''),
+      v1: num(prof.commonRatio) != null ? prof.commonRatio + '%' : '', v2: num(prof.secondRatio) != null ? prof.secondRatio + '%' : '',
+      rows: weights.map(function (w) { return [w.subject, String(w.points)]; }), total: weights.length ? String(total).replace(/\B(?=(\d{3})+(?!\d))/g, ',') : '' };
+    var chart = subs.map(function (k) { return { sub: k, cur: num(cur[k]) != null ? num(cur[k]) : '', tgt: num(tgt[k]) != null ? num(tgt[k]) : '' }; }).filter(function (r) { return r.cur !== '' || r.tgt !== ''; });
+    var mockSubs = sortSubjects(uniq([].concat.apply([], mocks.map(function (m) { return Object.keys(m.devs || {}).filter(function (k) { return num(m.devs[k]) != null; }); }))));
+    var mockRows = mocks.map(function (m) { return [monthLabel(m.month) + (m.name ? ' ' + m.name : '')].concat(mockSubs.map(function (k) { return num(m.devs && m.devs[k]) != null ? String(m.devs[k]) : '-'; })).concat([m.judge || '-']); });
+    return {
+      profileRows: rows, goal: prof.goalText || '',
+      exam: exam, chart: chart,
+      legendCur: last ? '現在（' + monthLabel(last.month) + '模試）' : '', legendTgt: '目標（' + monthLabel(examMonthOf(st)) + '入試）',
+      policies: (prof.policies || []).filter(Boolean),
+      priorities: (prof.priorities || []).filter(function (x) { return x && (x.title || x.desc); }).map(function (x) { return { t: x.title || '', d: x.desc || '' }; }),
+      milestones: (p.stages || []).filter(function (s) { return s.start; }).map(function (s) { return [periodLabel(s.start, s.end), (s.label || '') + (s.note ? '：' + s.note : '')]; }),
+      materials: sortedMaterialsOf(p).map(function (m) { return { sub: m.subject || '', name: m.name + (startNo(m) > 1 && num(m.count) ? '（' + autoRange(m) + '）' : ''), purpose: m.purpose || '', start: m.start ? monthShort(m.start.slice(0, 7)) : '', end: m.end ? monthShort(m.end.slice(0, 7)) : '', cycles: (m.rounds || 1) + '周', crit: m.criteria || '' }; }),
+      mocks: { header: ['実施時期'].concat(mockSubs).concat(['判定']), rows: mockRows }
+    };
+  }
+  function sortedMaterialsOf(p) {
+    return (p.materials || []).slice().sort(function (a, b) {
+      var ia = SUBJECT_ORDER.indexOf(a.subject), ib = SUBJECT_ORDER.indexOf(b.subject);
+      if (ia < 0) ia = 99; if (ib < 0) ib = 99;
+      return ia - ib || String(a.start || '9').localeCompare(String(b.start || '9'));
+    });
+  }
+
+  /* ============================================================
    * モーダル
    * ============================================================ */
   function showModal(html, small) {
@@ -14308,6 +14424,10 @@ function _loadPageStateFromStudent(s) {
     },
     flush: flush,
     render: render,
+    // 他の画面との連携（ダッシュボード・合格戦略シート）
+    mockTrendHtml: mockTrendHtml,
+    planFor: planFor,
+    sheetDataAsync: function (st) { return planForAsync(st).then(function (p) { return sheetDataFrom(st, p); }); },
     _debug: { state: S, alloc: alloc, computeAlloc: computeAlloc, matStats: matStats, subjectStats: subjectStats, genWeek: genWeek, autoStages: autoStages, createPlanFor: createPlanFor,
       mergePlans: mergePlans, normalizePlan: normalizePlan, migrate: migrate, checkRemote: checkRemote, pushCloud: pushCloud, derivedFrom: derivedFrom, syncFromStudent: syncFromStudent,
       weeksOfMonth: weeksOfMonth, weekAutoRange: weekAutoRange, weekGoal: weekGoal, weekText: weekText }
