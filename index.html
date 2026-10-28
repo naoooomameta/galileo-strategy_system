@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ガリレオ 戦略管理システム v1.2.2</title>
+<title>ガリレオ 戦略管理システム v1.2.3</title>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@400;600;700&family=Noto+Sans+JP:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.3/dist/umd/supabase.min.js"></script>
@@ -1134,7 +1134,7 @@
       </div>
       <div>
         <div class="logo-text">ガリレオ 理系大学受験 戦略管理システム</div>
-        <span class="logo-sub">GALILEO SCIENCE EXAM STRATEGY — v1.2.2</span>
+        <span class="logo-sub">GALILEO SCIENCE EXAM STRATEGY — v1.2.3</span>
       </div>
     </div>
   </div>
@@ -5141,6 +5141,11 @@ async function generateRoadmap() {
     timelineData: _existingStudent ? _existingStudent.timelineData : null,
     adviceData: _existingStudent ? _existingStudent.adviceData : null });
   if (_existingStudent && _existingStudent._id) _newStudentObj._id = _existingStudent._id;
+  // 画面にチェック欄のない古い科目名（例：数学2BC）は、既存の登録から引き継ぐ（外す手段がないため消さない）
+  if (_existingStudent && Array.isArray(_existingStudent.mainSubjects)) {
+    var _knownSubs = Array.prototype.map.call(document.querySelectorAll('#main-subject-checks input[type="checkbox"]'), function(el) { return el.value; });
+    _existingStudent.mainSubjects.forEach(function(v) { if (v && _knownSubs.indexOf(v) < 0 && mainSubjects.indexOf(v) < 0) mainSubjects.push(v); });
+  }
 
   // ① ロードマップ生成・表示（必ず実行）
   const loading = document.getElementById('loading');
