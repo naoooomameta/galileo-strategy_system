@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ガリレオ 戦略管理システム v1.2.3</title>
+<title>ガリレオ 戦略管理システム v1.2.4</title>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@400;600;700&family=Noto+Sans+JP:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.3/dist/umd/supabase.min.js"></script>
@@ -1049,6 +1049,12 @@
   .gr-st.todo { background:#eeeee8; color:#6b6b62; } .gr-st.submitted { background:#e3ecf6; color:#2c4f6e; }
   .gr-st.graded { background:#dcefe6; color:#1f6a50; } .gr-st.missing { background:#fbe3dc; color:#a3361f; } .gr-st.resubmit { background:#f6ecd4; color:#7d6022; }
   .gr-summary { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px; }
+  .gr-wgoals { background:#f4f8f6; border:1px solid #d9e6df; border-radius:8px; padding:10px 12px; margin-bottom:12px; }
+  .gr-wgoals-h { display:flex; align-items:center; font-size:12.5px; font-weight:700; color:var(--ink); margin-bottom:8px; }
+  .gr-wgoals-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(260px, 1fr)); gap:8px 14px; }
+  .gr-wgoal-m { font-size:11.5px; font-weight:700; color:var(--ink); margin-bottom:3px; display:flex; align-items:center; gap:5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .gr-weeks th { vertical-align:top; }
+  .gr-weeks td { vertical-align:top; }
   .gr-summary > div { background:#faf8f2; border:1px solid #eee8da; border-radius:8px; padding:6px 12px; font-size:12px; color:var(--text-muted); }
   .gr-summary b { font-family:'DM Mono', monospace; font-size:15px; color:var(--ink); margin:0 2px; }
 
@@ -1134,7 +1140,7 @@
       </div>
       <div>
         <div class="logo-text">ガリレオ 理系大学受験 戦略管理システム</div>
-        <span class="logo-sub">GALILEO SCIENCE EXAM STRATEGY — v1.2.3</span>
+        <span class="logo-sub">GALILEO SCIENCE EXAM STRATEGY — v1.2.4</span>
       </div>
     </div>
   </div>
@@ -12622,6 +12628,7 @@ function _loadPageStateFromStudent(s) {
     Object.keys(prof).forEach(function (k) { if (p.profile[k] == null) p.profile[k] = prof[k]; });
     ['subjects', 'materials', 'stages', 'events', 'tasks', 'reviews', 'mocks', 'history', 'skips'].forEach(function (k) { if (!Array.isArray(p[k])) p[k] = []; });
     if (!p.months || typeof p.months !== 'object') p.months = {};
+    if (!p.weeks || typeof p.weeks !== 'object') p.weeks = {};   // 週間目標：weeks[週の月曜].goals[教材ID]
     // IDのない行には内容から決まるIDを付ける（どの画面で読み込んでも同じIDになり、同時編集のマージで行を対応づけられる）
     function fixIds(arr, prefix) { arr.forEach(function (row, i) { if (row && typeof row === 'object' && !row.id) row.id = prefix + i + '_' + hashStr(canonStr(row)); }); }
     fixIds(p.materials, 'm'); fixIds(p.tasks, 't'); fixIds(p.reviews, 'r'); fixIds(p.stages, 'st'); fixIds(p.events, 'ev'); fixIds(p.mocks, 'mk'); fixIds(p.history, 'h');
@@ -12831,6 +12838,24 @@ function _loadPageStateFromStudent(s) {
       });
     }
     return slots;
+  }
+  // ある月にかかる週（月曜の日付）を並べる。月をまたぐ週も含める
+  function weeksOfMonth(M) {
+    var last = lastDayOfMonth(M), mon = mondayOf(M + '-01'), out = [], guard = 0;
+    while (mon <= last && guard++ < 8) { out.push(mon); mon = addDays(mon, 7); }
+    return out;
+  }
+  // その週の教材の範囲（自動）：「例題41〜46（1・2周目）」。割り振りがなければ ''
+  function weekAutoRange(m, mon) { return rangeSummary(m, mon, addDays(mon, 6)); }
+  // その週の目標：手で入れた週間目標があればそれ、なければ自動の範囲
+  function weekGoal(m, mon) {
+    var w = S.plan.weeks && S.plan.weeks[mon], g = w && w.goals && w.goals[m.id];
+    return (g && String(g).trim()) || weekAutoRange(m, mon);
+  }
+  // その週に関係する教材（期間が重なる、または週間目標が入力されている）
+  function weekMaterials(mon) {
+    var sun = addDays(mon, 6), w = S.plan.weeks && S.plan.weeks[mon];
+    return sortedMaterials().filter(function (m) { return (m.start && m.end && m.start <= sun && m.end >= mon) || !!(w && w.goals && w.goals[m.id] && String(w.goals[m.id]).trim()); });
   }
   // ある期間（[from, to]）の割り振りを「例題1〜30（1周目）」のような文にまとめる
   function rangeSummary(m, from, to) {
@@ -13332,10 +13357,31 @@ function _loadPageStateFromStudent(s) {
     var tableCard = toolbar + '<div class="gr-table-wrap"><table class="gr-table"><tr><th>科目・教材</th><th>今月の範囲・進捗目標</th><th>到達目標・評価方法</th><th>実績（自動）</th><th>月末判定</th></tr>' + rows + '</table></div>'
       + '<div class="gr-callout"><b>月末判定ルール</b>　基準達成 → 次の単元へ ／ 未達 → 原因を分類（知識不足・解法の選択・計算ミス・時間不足など）し、復習を優先して翌月の課題量を調整します。予定の変更は理由とともに履歴に残します。</div>';
     return card(monthLabel(M) + '｜科目別の目標', tableCard, { right: right })
+      + card(monthLabel(M) + '｜週ごとの範囲・目標', weeklyGoalsTable(M, mats), { h: 'blue' })
       + '<div class="gr-grid gr-grid-2">'
       + card('月次サマリー（学習状況のご報告用）', '<div class="gr-field"><label>今月できるようになったこと</label>' + ta('months.' + M + '.can', { rows: 3, ph: '英文法の時制を根拠つきで判断できるようになり、確認テスト正答率が改善。' }) + '</div><div class="gr-field" style="margin-bottom:0"><label>次月の重点</label>' + ta('months.' + M + '.next', { rows: 3, ph: '数学：初見類題への対応／物理：図示と立式の反復／英語：長文読解への接続' }) + '</div>')
       + card('面談での説明例', ta('months.' + M + '.talk', { rows: 7, ph: '英文法は判断力が改善。一方、物理は図示から立式する過程に課題が残るため、翌月は問題数より説明の再現性を重視します。' }), { h: 'blue' })
       + '</div>';
+  }
+  // 教材×週の表：各マスに「その週の範囲（自動）」と週間目標の入力欄
+  function weeklyGoalsTable(M, mats) {
+    var weeks = weeksOfMonth(M), from = M + '-01', to = lastDayOfMonth(M), t0 = today(), mon0 = mondayOf(t0);
+    if (!mats.length) return '<div class="gr-muted" style="padding:6px 0">この月に取り組む教材がありません。</div>';
+    var head = '<tr><th style="min-width:170px">科目・教材</th>' + weeks.map(function (mon, i) {
+      var sun = addDays(mon, 6), out = (mon < from ? mdLabel(from) : mdLabel(mon)) + '〜' + (sun > to ? mdLabel(to) : mdLabel(sun));
+      return '<th style="min-width:150px">第' + (i + 1) + '週' + (mon === mon0 ? ' <span class="gr-pill mid">今週</span>' : '') + '<div class="gr-muted" style="font-weight:400">' + mdw(mon) + '〜' + mdw(sun) + (mon < from || sun > to ? '<br><span style="font-size:10.5px">（この月は' + out + '）</span>' : '') + '</div></th>';
+    }).join('') + '</tr>';
+    var body = mats.map(function (m) {
+      return '<tr><td><div class="gr-sub-cell"><span class="gr-dot" style="background:' + subjectColor(m.subject) + '"></span>' + esc(m.subject) + '</div><div style="margin-top:3px;font-weight:700">' + esc(m.name) + '</div><div class="gr-muted">' + esc(rangeSummary(m, from, to) || '') + '</div></td>'
+        + weeks.map(function (mon) {
+          var sun = addDays(mon, 6);
+          if (!(m.start && m.end && m.start <= sun && m.end >= mon)) return '<td class="gr-muted" style="text-align:center">—</td>';
+          var auto = weekAutoRange(m, mon);
+          return '<td><div class="gr-muted" style="margin-bottom:4px">' + esc(auto || '（この週の割り振りはありません）') + '</div>' + inp('weeks.' + mon + '.goals.' + m.id, { ph: auto || '例：例題1〜13', isDefault: !!auto }) + '</td>';
+        }).join('') + '</tr>';
+    }).join('');
+    return '<div class="gr-table-wrap"><table class="gr-table gr-weeks">' + head + body + '</table></div>'
+      + '<div class="gr-note">上の段は教材の期間・問題数・周回から自動で計算した週の範囲、下の欄は週間目標です（空欄のままなら自動の範囲が目標になります）。同じ週間目標は「週間・毎日課題」の週間学習計画と配信用テキストにも表示されます。左の教材名の下は今月の範囲です。</div>';
   }
   function monthResultCell(ms, unit) {
     if (!ms.n && !ms.planned) return '<span class="gr-muted">—</span>';
@@ -13491,8 +13537,13 @@ function _loadPageStateFromStudent(s) {
     }
     if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(txt).then(function () { done(true); }, fallback); else fallback();
   }
+  function weekGoalLines(mon) {
+    return weekMaterials(mon).map(function (m) { var g = weekGoal(m, mon); return g ? (m.subject ? m.subject + '｜' : '') + m.name + '：' + g : ''; }).filter(Boolean);
+  }
   function weekText(mon) {
     var lines = ['【' + S.student.name + 'さん　' + mdLabel(mon) + '〜' + mdLabel(addDays(mon, 6)) + 'の課題】'];
+    var goals = weekGoalLines(mon);
+    if (goals.length) { lines.push(''); lines.push('■今週の目標'); goals.forEach(function (g) { lines.push('・' + g); }); }
     for (var i = 0; i < 7; i++) {
       var d = addDays(mon, i), ts = tasksOn(d);
       lines.push(''); lines.push('■' + mdw(d) + (i === 5 ? '　予備日' : i === 6 ? '　復習日' : ''));
@@ -13543,8 +13594,15 @@ function _loadPageStateFromStudent(s) {
       });
       body += '<td class="gr-sum">' + esc(minutesText(dts.reduce(function (a, t) { return a + (num(t.minutes) || 0); }, 0))) + '</td></tr>';
     }
+    var wms = weekMaterials(mon), M0 = mon.slice(0, 7);
+    var goalsBox = '<div class="gr-wgoals"><div class="gr-wgoals-h">今週の範囲・目標<span class="gr-muted" style="font-weight:400;margin-left:8px">（「月間ロードマップ」の週ごとの目標と同じ欄です）</span>'
+      + '<button class="gr-link gr-noprint" style="margin-left:auto" data-gr-act="goto-month" data-month="' + M0 + '">月間ロードマップで見る →</button></div>'
+      + (wms.length ? '<div class="gr-wgoals-grid">' + wms.map(function (m) {
+          var auto = weekAutoRange(m, mon);
+          return '<div class="gr-wgoal"><div class="gr-wgoal-m"><span class="gr-dot" style="background:' + subjectColor(m.subject) + '"></span>' + esc(m.subject || '') + '｜' + esc(m.name) + '</div>' + inp('weeks.' + mon + '.goals.' + m.id, { ph: auto || '例：例題1〜13', isDefault: !!auto }) + '</div>';
+        }).join('') + '</div>' : '<div class="gr-muted">この週に期間がかかる教材はありません。</div>') + '</div>';
     var empty = !tasks.length ? '<div class="gr-callout" style="margin-bottom:10px">この週の課題はまだありません。' + (p.materials.length ? '「この週の課題を作成」を押すと、教材の範囲から月〜金の課題を自動で作ります。' : '先に「合格ロードマップ」タブの「教材・年間計画」で教材（問題数・期間）を登録してください。') + '</div>' : '';
-    return card(weekOfMonthLabel(mon) + '｜' + (cols.length ? cols.join('・') : '科目未設定'), toolbar + summary + empty
+    return card(weekOfMonthLabel(mon) + '｜' + (cols.length ? cols.join('・') : '科目未設定'), toolbar + summary + goalsBox + empty
       + '<div class="gr-table-wrap"><table class="gr-week">' + head + body + '</table></div>'
       + '<div class="gr-callout blue">運用：月間目標 → 週間課題 → 毎日の配信。土曜は平日の予備日、日曜はその週の復習日です。採点で誤答を入力すると復習キューに追加され、「この週の課題を作成」で日曜の復習に割り当てられます。課題をクリックすると内容・日付・状態を変更できます。</div>');
   }
@@ -14064,6 +14122,7 @@ function _loadPageStateFromStudent(s) {
         touch(); closeModal(); rerender(); toast('教材を削除しました');
       });
     },
+    'goto-month': function (el) { S.month = el.getAttribute('data-month') || thisMonth(); S.tab.groad = 'monthly'; saveUi(); if (typeof showPage === 'function') showPage('groad'); else renderPage('groad'); },
     'month-prev': function () { S.month = addMonths(S.month || thisMonth(), -1); rerender(); },
     'month-next': function () { S.month = addMonths(S.month || thisMonth(), 1); rerender(); },
     'month-today': function () { S.month = thisMonth(); rerender(); },
@@ -14250,7 +14309,8 @@ function _loadPageStateFromStudent(s) {
     flush: flush,
     render: render,
     _debug: { state: S, alloc: alloc, computeAlloc: computeAlloc, matStats: matStats, subjectStats: subjectStats, genWeek: genWeek, autoStages: autoStages, createPlanFor: createPlanFor,
-      mergePlans: mergePlans, normalizePlan: normalizePlan, migrate: migrate, checkRemote: checkRemote, pushCloud: pushCloud, derivedFrom: derivedFrom, syncFromStudent: syncFromStudent }
+      mergePlans: mergePlans, normalizePlan: normalizePlan, migrate: migrate, checkRemote: checkRemote, pushCloud: pushCloud, derivedFrom: derivedFrom, syncFromStudent: syncFromStudent,
+      weeksOfMonth: weeksOfMonth, weekAutoRange: weekAutoRange, weekGoal: weekGoal, weekText: weekText }
   };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 })();
