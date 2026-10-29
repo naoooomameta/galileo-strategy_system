@@ -1,0 +1,60 @@
+{
+ "updatedAt": "2026-10-27T00:00:00Z",
+ "source": {
+  "folderId": "X",
+  "name": "テスト参考書",
+  "url": "https://drive.google.com/drive/folders/X"
+ },
+ "count": 7,
+ "books": [
+  {
+   "id": "b1",
+   "name": "1対1対応の演習 数学1 大学への数学",
+   "subject": "数学",
+   "path": "数学／１A",
+   "url": "https://drive.google.com/file/d/b1/view"
+  },
+  {
+   "id": "b2",
+   "name": "【青】チャート式 基礎からの数学I+A チャート研究所",
+   "subject": "数学",
+   "path": "数学／１A",
+   "url": "https://drive.google.com/file/d/b2/view"
+  },
+  {
+   "id": "b3",
+   "name": "基礎問題精講 数学II・B",
+   "subject": "数学",
+   "path": "数学／２B",
+   "url": "https://drive.google.com/file/d/b3/view"
+  },
+  {
+   "id": "b4",
+   "name": "物理のエッセンス 力学・波動",
+   "subject": "物理",
+   "path": "理科／物理基礎・物理",
+   "url": "https://drive.google.com/file/d/b4/view"
+  },
+  {
+   "id": "b5",
+   "name": "良問の風 物理",
+   "subject": "物理",
+   "path": "理科／物理基礎・物理",
+   "url": "https://drive.google.com/file/d/b5/view"
+  },
+  {
+   "id": "b6",
+   "name": "一橋大の英語20カ年",
+   "subject": "",
+   "path": "志望校対策",
+   "url": "https://drive.google.com/file/d/b6/view"
+  },
+  {
+   "id": "b7",
+   "name": "システム英単語",
+   "subject": "英語",
+   "path": "英語／英単語帳",
+   "url": "https://drive.google.com/file/d/b7/view"
+  }
+ ]
+}

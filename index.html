@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ガリレオ 戦略管理システム v1.2.6</title>
+<title>ガリレオ 戦略管理システム v1.2.7</title>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@400;600;700&family=Noto+Sans+JP:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.3/dist/umd/supabase.min.js"></script>
@@ -937,7 +937,19 @@
   .gr-in:focus { border-color:var(--teal); box-shadow:0 0 0 2px rgba(61,94,79,.15); }
   textarea.gr-in { min-height:64px; line-height:1.6; resize:vertical; }
   .gr-in.num { text-align:right; font-family:'DM Mono', monospace; }
+  /* 数値欄の増減ボタンは表示しない（狭い表の中で入力した数字が隠れるため） */
+  .gr-in.num::-webkit-outer-spin-button, .gr-in.num::-webkit-inner-spin-button { -webkit-appearance:none; margin:0; }
+  .gr-in.num[type=number] { -moz-appearance:textfield; appearance:textfield; }
   .gr-in.w60 { width:60px; } .gr-in.w80 { width:80px; } .gr-in.w100 { width:100px; } .gr-in.w130 { width:130px; }
+  /* 模試結果の表：科目が多くても欄が潰れないよう最小幅を確保し、入りきらない分は横スクロール */
+  .gr-mocks td, .gr-mocks th { white-space:nowrap; }
+  .gr-mocks .gr-in { min-width:46px; padding:5px 6px; }
+  .gr-mocks .gr-in.num { min-width:48px; }
+  .gr-mocks .gr-in[type=month] { min-width:120px; }
+  .gr-mocks td.name .gr-in { min-width:110px; }
+  /* 参考書フォルダ（Drive）のファイルへのリンク */
+  .gr-booklink { text-decoration:none; font-size:12px; margin-left:2px; opacity:.75; }
+  .gr-booklink:hover { opacity:1; }
   select.gr-in { padding:5px 6px; }
   .gr-kv { display:grid; grid-template-columns: 92px 1fr; gap:6px 10px; align-items:center; font-size:12.5px; }
   .gr-kv > .k { color:var(--text-muted); font-size:11.5px; font-weight:700; }
@@ -1140,7 +1152,7 @@
       </div>
       <div>
         <div class="logo-text">ガリレオ 理系大学受験 戦略管理システム</div>
-        <span class="logo-sub">GALILEO SCIENCE EXAM STRATEGY — v1.2.6</span>
+        <span class="logo-sub">GALILEO SCIENCE EXAM STRATEGY — v1.2.7</span>
       </div>
     </div>
   </div>
@@ -12955,6 +12967,104 @@ function ssApplyRoadmap(sd) {
   }
 
   /* ============================================================
+   * 参考書フォルダ（Google Drive「プラトン・ガリレオ共通（参考書）毎日課題」）のカタログ
+   *  サイト直下の books.json（tools/crawl_books.py が週1回自動更新）を読み込み、
+   *  「課題を追加」「教材を追加」の画面でフォルダ内の本を選べるようにする。
+   *  カタログは全生徒共通の読み取り専用データで、生徒ごとの計画（plan）やクラウド同期とは別。
+   *  本を選んで課題を保存すると、その生徒の教材一覧に（まだ無ければ）教材として追加され、
+   *  教材には driveId / link（Driveのファイル）が付く。
+   * ============================================================ */
+  var CATALOG_URL = 'books.json';
+  var LS_CATALOG = 'galileo_grbooks';
+  S.catalog = null;          // { updatedAt, source:{name,url}, count, books:[{id,name,subject,path,url}] }
+  S.catalogState = 'idle';   // idle | loading | ok | error
+
+  function catalogBooks() { return (S.catalog && Array.isArray(S.catalog.books)) ? S.catalog.books : []; }
+  function catalogById(id) { return catalogBooks().filter(function (b) { return b.id === id; })[0] || null; }
+  function normBook(s) { return String(s || '').replace(/[\s　_・･]+/g, '').toLowerCase(); }
+  // 科目が決まっていれば、その科目の本＋科目の決まっていない本（志望校対策・その他）
+  function catalogBooksFor(subject) {
+    var all = catalogBooks();
+    return subject ? all.filter(function (b) { return b.subject === subject || !b.subject; }) : all;
+  }
+  // この生徒の教材一覧に同じ本があればその教材
+  function planMaterialForBook(b) {
+    if (!S.plan || !b) return null;
+    return S.plan.materials.filter(function (m) { return (m.driveId && m.driveId === b.id) || (m.name && b.name && normBook(m.name) === normBook(b.name)); })[0] || null;
+  }
+  function catalogBookByName(name) {
+    var k = normBook(name); if (!k) return null;
+    return catalogBooks().filter(function (b) { return normBook(b.name) === k; })[0] || null;
+  }
+  // <optgroup>（フォルダごと）の HTML。opts.includeRegistered が偽なら、すでに教材一覧にある本は除く
+  function catalogOptionsHtml(subject, selectedId, opts) {
+    opts = opts || {};
+    var groups = [], map = {};
+    catalogBooksFor(subject).forEach(function (b) {
+      if (!opts.includeRegistered && planMaterialForBook(b)) return;
+      var g = b.path || '（未分類）';
+      if (!map[g]) { map[g] = []; groups.push(g); }
+      map[g].push(b);
+    });
+    return groups.map(function (g) {
+      return '<optgroup label="' + esc('参考書フォルダ：' + g) + '">' + map[g].map(function (b) {
+        return '<option value="cat:' + esc(b.id) + '"' + (b.id === selectedId ? ' selected' : '') + '>' + esc(b.name) + '</option>';
+      }).join('') + '</optgroup>';
+    }).join('');
+  }
+  // 参考書フォルダの本を、この生徒の教材一覧に（まだ無ければ）追加して教材を返す
+  function ensureMaterialFromBook(bookId, subject) {
+    var b = catalogById(bookId); if (!b || !S.plan) return null;
+    var ex = planMaterialForBook(b);
+    if (ex) { if (!ex.driveId) { ex.driveId = b.id; ex.link = b.url; } return ex; }
+    var subj = subject || b.subject || '';
+    var m = { id: uid('m'), subject: subj, name: b.name, purpose: '', range: '', unitLabel: '問題', count: null, startNo: null, rounds: 1, pattern: 'straight', days: [1, 2, 3, 4, 5], minPerItem: 15,
+      start: '', end: '', criteria: '', passPct: 80, evalMethod: '', priority: '中', prereq: '', teacher: '', status: '進行中', driveId: b.id, link: b.url, fromCatalog: true };
+    S.plan.materials.push(m);
+    if (subj && S.plan.subjects.indexOf(subj) < 0) S.plan.subjects = sortSubjects(S.plan.subjects.concat([subj]));
+    return m;
+  }
+  // 教材に付いた Drive ファイルへのリンク（📄）
+  function bookLink(m) {
+    return (m && m.link) ? ' <a class="gr-booklink" href="' + esc(m.link) + '" target="_blank" rel="noopener" title="参考書フォルダのファイルを開く（' + esc(m.name || '') + '）">📄</a>' : '';
+  }
+  // 教材名の入力候補（datalist）と、開いている画面の「参考書フォルダから選ぶ」欄を更新
+  function refreshBookList() {
+    var dl = document.getElementById('gr-books');
+    if (dl) {
+      var names = BOOK_SUGGEST.slice();
+      try { if (typeof ALL_TEXTBOOKS !== 'undefined' && Array.isArray(ALL_TEXTBOOKS)) ALL_TEXTBOOKS.forEach(function (b) { if (b && b.name && names.indexOf(b.name) < 0) names.push(b.name); }); } catch (e) { }
+      catalogBooks().forEach(function (b) { if (b.name && names.indexOf(b.name) < 0) names.push(b.name); });
+      dl.innerHTML = names.map(function (n) { return '<option value="' + esc(n) + '">'; }).join('');
+    }
+    var ms = document.getElementById('gr-m-catalog');
+    if (ms) { var msub = gv('gr-m-subject'); ms.innerHTML = catalogSelectHtml(msub === '__custom' ? '' : msub, ms.value && ms.value.indexOf('cat:') === 0 ? ms.value.slice(4) : ''); }
+    var ts = document.getElementById('gr-t-material');
+    if (ts && S.modal && S.modal.type === 'task') { var cur = ts.value; ts.innerHTML = materialOptions(gv('gr-t-subject'), cur, true); if (cur) ts.value = cur; }
+  }
+  function catalogSelectHtml(subject, selectedId) {
+    return '<option value="">（フォルダの本を選ぶと教材名に入ります）</option>' + catalogOptionsHtml(subject, selectedId, { includeRegistered: true });
+  }
+  function catalogNote() {
+    var c = S.catalog;
+    if (!c) return S.catalogState === 'error' ? '参考書フォルダの一覧を読み込めませんでした' : '';
+    return '参考書フォルダ' + (c.count ? '（' + c.count + '冊' + (c.updatedAt ? '・' + c.updatedAt.slice(0, 10).replace(/-/g, '/') + '更新' : '') + '）' : '');
+  }
+  // books.json を読み込む（端末に前回の一覧があれば先にそれを使う）
+  function loadCatalog() {
+    if (!S.catalog) { try { var c = JSON.parse(localStorage.getItem(LS_CATALOG) || 'null'); if (c && Array.isArray(c.books)) { S.catalog = c; refreshBookList(); } } catch (e) { } }
+    if (S.catalogState === 'loading' || typeof fetch !== 'function') return Promise.resolve();
+    S.catalogState = 'loading';
+    return fetch(CATALOG_URL, { cache: 'no-cache' }).then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); }).then(function (j) {
+      if (!j || !Array.isArray(j.books)) throw new Error('形式が違います');
+      var changed = !S.catalog || S.catalog.updatedAt !== j.updatedAt || catalogBooks().length !== j.books.length;
+      S.catalog = j; S.catalogState = 'ok';
+      try { localStorage.setItem(LS_CATALOG, JSON.stringify(j)); } catch (e) { }
+      if (changed) refreshBookList();
+    }).catch(function (e) { S.catalogState = 'error'; console.warn('[GR] 参考書フォルダの一覧（books.json）を読み込めませんでした:', e && e.message || e); });
+  }
+
+  /* ============================================================
    * 画面の骨組み
    * ============================================================ */
   var PAGES = {
@@ -13188,14 +13298,16 @@ function ssApplyRoadmap(sd) {
   }
   function mocksEditor() {
     var subs = planSubjects(), p = S.plan;
-    var head = '<tr><th style="width:128px">実施月</th><th>模試名</th>' + subs.map(function (s) { return '<th class="num" style="width:58px">' + esc(s) + '</th>'; }).join('') + '<th style="width:54px">判定</th><th class="gr-noprint" style="width:28px"></th></tr>';
+    var head = '<tr><th style="width:132px">実施月</th><th>模試名</th>' + subs.map(function (s) { return '<th class="num" style="width:60px">' + esc(s) + '</th>'; }).join('') + '<th style="width:54px">判定</th><th class="gr-noprint" style="width:28px"></th></tr>';
     var rows = p.mocks.map(function (mk, i) {
-      return '<tr><td>' + inp('mocks.' + i + '.month', { type: 'month' }) + '</td><td>' + inp('mocks.' + i + '.name', { ph: '全統記述模試' }) + '</td>'
-        + subs.map(function (s) { return '<td>' + inp('mocks.' + i + '.devs.' + s, { type: 'number' }) + '</td>'; }).join('')
+      return '<tr><td>' + inp('mocks.' + i + '.month', { type: 'month' }) + '</td><td class="name">' + inp('mocks.' + i + '.name', { ph: '全統記述模試' }) + '</td>'
+        + subs.map(function (s) { return '<td>' + inp('mocks.' + i + '.devs.' + s, { type: 'number', min: 0, max: 100, step: 0.1 }) + '</td>'; }).join('')
         + '<td>' + inp('mocks.' + i + '.judge', { ph: 'C' }) + '</td><td class="gr-noprint"><button class="gr-x" title="削除" data-gr-act="row-del" data-path="mocks" data-i="' + i + '">×</button></td></tr>';
     }).join('');
     if (!rows) rows = '<tr><td colspan="' + (subs.length + 4) + '" class="gr-muted" style="text-align:center;padding:12px">模試の偏差値を入力すると「到達度」タブに推移グラフが表示されます</td></tr>';
-    return '<div class="gr-table-wrap"><table class="gr-table">' + head + rows + '</table></div><button class="gr-add gr-noprint" data-gr-act="row-add" data-path="mocks" data-tpl="' + esc(JSON.stringify({ month: thisMonth(), name: '', devs: {}, judge: '' })) + '">＋ 模試結果を追加</button><div class="gr-note">数値は偏差値です。新しい結果は上に追加されます。</div>';
+    // 科目が多いと欄が潰れて入力した数字が見えなくなるため、表に最小幅を持たせる（入りきらない分は横スクロール）
+    var minW = 132 + 126 + subs.length * 62 + 54 + 28;
+    return '<div class="gr-table-wrap"><table class="gr-table gr-mocks" style="min-width:' + minW + 'px">' + head + rows + '</table></div><button class="gr-add gr-noprint" data-gr-act="row-add" data-path="mocks" data-tpl="' + esc(JSON.stringify({ month: thisMonth(), name: '', devs: {}, judge: '' })) + '">＋ 模試結果を追加</button><div class="gr-note">数値は偏差値です。新しい結果は上に追加されます。</div>';
   }
   function studyTimeChart() {
     var p = S.plan, mon = mondayOf(today()), data = [];
@@ -13230,7 +13342,7 @@ function ssApplyRoadmap(sd) {
       var st = matStats(m), per = matPerDay(m);
       var rng = m.range || autoRange(m), u = unitOf(m);
       return '<tr class="gr-row-click" data-gr-act="mat-edit" data-id="' + esc(m.id) + '"><td><div class="gr-sub-cell"><span class="gr-dot" style="background:' + subjectColor(m.subject) + '"></span>' + esc(m.subject || '—') + '</div></td>'
-        + '<td><b>' + esc(m.name) + '</b>' + prioPill(m.priority) + (m.prereq ? '<div class="gr-muted">前提：' + esc(m.prereq) + '</div>' : '') + '</td>'
+        + '<td><b>' + esc(m.name) + '</b>' + bookLink(m) + prioPill(m.priority) + (m.prereq ? '<div class="gr-muted">前提：' + esc(m.prereq) + '</div>' : '') + '</td>'
         + '<td>' + esc(m.purpose || '—') + '</td>'
         + '<td>' + esc(rng || '—') + '<div class="gr-muted">' + (num(m.count) ? m.count + esc(u) + ' × ' + (m.rounds || 1) + '周' + (m.pattern === 'redo' ? '（解き直し型）' : '') : '問題数未設定') + '</div></td>'
         + '<td style="white-space:nowrap">' + (m.start && m.end ? mdLabel(m.start) + '〜' + mdLabel(m.end) : '—') + '<div class="gr-muted">' + (per ? '1日 約' + (Math.round(per * 10) / 10) + esc(u) : '') + '</div></td>'
@@ -13641,7 +13753,7 @@ function ssApplyRoadmap(sd) {
     var rows = ts.map(function (t) {
       var mn = taskMaterialName(t);
       return '<tr class="gr-row-click' + (selT && selT.id === t.id ? ' gr-row-sel' : '') + '" data-gr-act="grade-pick" data-id="' + esc(t.id) + '"><td><div class="gr-sub-cell"><span class="gr-dot" style="background:' + subjectColor(t.subject) + '"></span>' + esc(t.subject || (t.kind === 'review' ? '復習' : '—')) + '</div></td>'
-        + '<td>' + (mn ? '<div class="gr-muted">' + esc(mn) + '</div>' : '') + esc(t.content || '（内容未入力）') + (t.kind !== 'study' ? ' <span class="gr-pill">' + esc(TASK_KINDS[t.kind] || '') + '</span>' : '') + '</td>'
+        + '<td>' + (mn ? '<div class="gr-muted">' + esc(mn) + bookLink(t.materialId ? matById(t.materialId) : null) + '</div>' : '') + esc(t.content || '（内容未入力）') + (t.kind !== 'study' ? ' <span class="gr-pill">' + esc(TASK_KINDS[t.kind] || '') + '</span>' : '') + '</td>'
         + '<td class="num">' + esc(minutesText(t.minutes) || '—') + '</td>'
         + '<td><select class="gr-in" style="width:96px" data-gr-change="task-status" data-id="' + esc(t.id) + '">' + statusOpts.map(function (k) { return '<option value="' + k + '"' + (t.status === k ? ' selected' : '') + '>' + TASK_STATUS[k] + '</option>'; }).join('') + '</select></td>'
         + '<td class="num">' + (t.status === 'graded' && num(t.total) ? (t.correct || 0) + '/' + t.total : '<span class="gr-muted">—</span>') + '</td>'
@@ -13656,7 +13768,7 @@ function ssApplyRoadmap(sd) {
     if (!t) return card('採点・フィードバック', '<div class="gr-empty" style="padding:1.5rem .5rem"><div class="gr-empty-icon">✍️</div>左の表で課題を選ぶと、正誤と講評を記録できます。<br>誤答した問題は復習キューに自動で追加されます。</div>', { h: 'blue' });
     var mn = taskMaterialName(t), tot = num(t.total), cor = num(t.correct);
     var defTotal = tot != null ? tot : (num(t.qty) || null);
-    var body = '<div class="gr-grade-h">' + esc(t.subject || '') + (mn ? '｜' + esc(mn) : '') + '</div><div class="gr-grade-sub">' + esc(t.content || '') + '　<span class="gr-st ' + esc(t.status) + '">' + esc(TASK_STATUS[t.status] || '') + '</span></div>'
+    var body = '<div class="gr-grade-h">' + esc(t.subject || '') + (mn ? '｜' + esc(mn) + bookLink(t.materialId ? matById(t.materialId) : null) : '') + '</div><div class="gr-grade-sub">' + esc(t.content || '') + '　<span class="gr-st ' + esc(t.status) + '">' + esc(TASK_STATUS[t.status] || '') + '</span></div>'
       + '<div class="gr-field"><label>正解数／問題数</label><div class="gr-grade-score"><input class="gr-in num w60" id="gr-g-correct" type="number" min="0" value="' + (cor != null ? cor : '') + '">題 ／ <input class="gr-in num w60" id="gr-g-total" type="number" min="0" value="' + (defTotal != null ? defTotal : '') + '">題中　<b id="gr-g-rate"></b></div><div class="gr-bar thick"><i id="gr-g-bar" style="width:0%"></i></div></div>'
       + '<div class="gr-field"><label>誤答した問題（「、」や「,」で区切る）</label><input class="gr-in" id="gr-g-wrong" value="' + esc(t.wrong || '') + '" placeholder="例：例題6、例題9"></div>'
       + '<div class="gr-form" style="grid-template-columns:1fr 1fr;margin-bottom:10px"><div class="gr-field"><label>誤答の原因</label><select class="gr-in" id="gr-g-cause"><option value="">— 選択 —</option>' + CAUSES.map(function (c) { return '<option' + (c === t.cause ? ' selected' : '') + '>' + esc(c) + '</option>'; }).join('') + '</select></div>'
@@ -13887,14 +13999,16 @@ function ssApplyRoadmap(sd) {
   function openMaterialModal(id) {
     var m = id ? matById(id) : null;
     var d = m ? JSON.parse(JSON.stringify(m)) : { id: uid('m'), subject: S.matFilter || planSubjects()[0] || '', name: '', purpose: '', range: '', unitLabel: '例題', count: '', rounds: 2, pattern: 'straight', days: [1, 2, 3, 4, 5], minPerItem: 15, start: today(), end: addDays(today(), 55), criteria: '', passPct: 80, evalMethod: '', priority: '中', prereq: '', teacher: '', status: '未着手' };
-    S.modal = { type: 'material', isNew: !m, orig: m ? JSON.parse(JSON.stringify(m)) : null, id: d.id };
+    S.modal = { type: 'material', isNew: !m, orig: m ? JSON.parse(JSON.stringify(m)) : null, id: d.id, driveId: d.driveId || null, link: d.link || '' };
     var subs = sortSubjects(planSubjects().concat(SUBJECT_ORDER.slice(0, 8)));
     if (d.subject && subs.indexOf(d.subject) < 0) subs.push(d.subject);
     var days = matDays(d);
     var dayBoxes = [1, 2, 3, 4, 5, 6, 0].map(function (w) { return '<label><input type="checkbox" class="gr-m-day" value="' + w + '"' + (days.indexOf(w) >= 0 ? ' checked' : '') + '>' + DOW[w] + '</label>'; }).join('');
+    var catField = catalogBooks().length ? mField(esc(catalogNote() || '参考書フォルダから選ぶ'), '<select class="gr-in" id="gr-m-catalog">' + catalogSelectHtml(d.subject, d.driveId || '') + '</select>' + (d.link ? '<div class="gr-note" style="margin-top:4px">この教材は参考書フォルダの本と結びついています' + bookLink(d) + '</div>' : ''), true) : '';
     var body = '<div class="gr-form">'
       + mField('科目', mSelect('gr-m-subject', d.subject, subs.map(function (x) { return [x, x]; }).concat([['__custom', 'その他（入力する）']])) + '<input class="gr-in" id="gr-m-subject-custom" style="margin-top:4px;display:none" placeholder="科目名">')
       + mField('教材名', mInput('gr-m-name', d.name, { ph: '入門問題精講 数学II・B', list: 'gr-books' }))
+      + catField
       + mField('教材の目的（なぜこの教材を使うか）', mInput('gr-m-purpose', d.purpose, { ph: '公式の背景理解と典型問題の習得' }), true)
       + mField('対象範囲（表示用）', mInput('gr-m-range', d.range, { ph: '例題1〜60（指定単元）' }))
       + mField('問題の呼び方', mInput('gr-m-unitLabel', d.unitLabel, { ph: '例題', list: 'gr-unitlabels' }))
@@ -13924,7 +14038,12 @@ function ssApplyRoadmap(sd) {
     var subj = gv('gr-m-subject'); if (subj === '__custom') subj = gv('gr-m-subject-custom').trim();
     var days = [].slice.call(document.querySelectorAll('.gr-m-day')).filter(function (c) { return c.checked; }).map(function (c) { return +c.value; });
     var pp = num(gv('gr-m-passPct'));
-    return { id: S.modal ? S.modal.id : uid('m'), subject: subj, name: gv('gr-m-name').trim(), purpose: gv('gr-m-purpose').trim(), range: gv('gr-m-range').trim(), unitLabel: gv('gr-m-unitLabel').trim(),
+    // 参考書フォルダの本との結びつき：選んだ本と教材名が一致していれば残す。名前がカタログの本と一致すれば自動で結びつける
+    var name = gv('gr-m-name').trim(), driveId = S.modal ? S.modal.driveId : null, link = S.modal ? S.modal.link : '';
+    var linked = driveId ? catalogById(driveId) : null;
+    if (linked && normBook(linked.name) !== normBook(name)) { driveId = null; link = ''; linked = null; }
+    if (!driveId) { var byName = catalogBookByName(name); if (byName) { driveId = byName.id; link = byName.url; } }
+    return { id: S.modal ? S.modal.id : uid('m'), subject: subj, name: name, purpose: gv('gr-m-purpose').trim(), range: gv('gr-m-range').trim(), unitLabel: gv('gr-m-unitLabel').trim(), driveId: driveId || null, link: link || '',
       count: num(gv('gr-m-count')), startNo: (Math.floor(num(gv('gr-m-startNo')) || 1) > 1 ? Math.floor(num(gv('gr-m-startNo'))) : null), rounds: Math.max(1, Math.floor(num(gv('gr-m-rounds')) || 1)), start: gv('gr-m-start'), end: gv('gr-m-end'), pattern: gv('gr-m-pattern') || 'straight',
       minPerItem: num(gv('gr-m-minPerItem')) || 15, days: days.length ? days : [1, 2, 3, 4, 5], criteria: gv('gr-m-criteria').trim(), passPct: pp == null ? 80 : clamp(pp, 0, 100),
       evalMethod: gv('gr-m-evalMethod').trim(), priority: gv('gr-m-priority'), prereq: gv('gr-m-prereq').trim(), teacher: gv('gr-m-teacher').trim(), status: gv('gr-m-status') || '未着手' };
@@ -13965,9 +14084,13 @@ function ssApplyRoadmap(sd) {
   }
 
   /* ---------- 課題 ---------- */
-  function materialOptions(subject, selected) {
+  // withCatalog：参考書フォルダの本（この生徒にまだ登録していないもの）も「cat:ID」として選べるようにする
+  function materialOptions(subject, selected, withCatalog) {
     var list = sortedMaterials().filter(function (m) { return !subject || m.subject === subject; });
-    return '<option value="">（教材なし）</option>' + list.map(function (m) { return '<option value="' + esc(m.id) + '"' + (m.id === selected ? ' selected' : '') + '>' + esc(m.name) + '</option>'; }).join('');
+    var own = list.map(function (m) { return '<option value="' + esc(m.id) + '"' + (m.id === selected ? ' selected' : '') + '>' + esc(m.name) + '</option>'; }).join('');
+    if (withCatalog && list.length) own = '<optgroup label="この生徒の教材">' + own + '</optgroup>';
+    var cat = withCatalog ? catalogOptionsHtml(subject, selected && selected.indexOf('cat:') === 0 ? selected.slice(4) : '', {}) : '';
+    return '<option value="">（教材なし）</option>' + own + cat;
   }
   function openTaskModal(id, preset) {
     var t = id ? taskById(id) : null; preset = preset || {};
@@ -13979,7 +14102,7 @@ function ssApplyRoadmap(sd) {
     var body = '<div class="gr-form">'
       + mField('日付', mInput('gr-t-date', d.date, { type: 'date' }))
       + mField('科目', mSelect('gr-t-subject', d.subject, [['', '（科目なし）']].concat(subs.map(function (s) { return [s, s]; }))))
-      + mField('教材', '<select class="gr-in" id="gr-t-material">' + materialOptions(d.subject, d.materialId) + '</select>')
+      + mField('教材', '<select class="gr-in" id="gr-t-material">' + materialOptions(d.subject, d.materialId, true) + '</select><div class="gr-note" id="gr-t-mnote" style="display:none;margin-top:4px">参考書フォルダの本です。保存するとこの生徒の教材一覧に追加されます（期間・問題数は「教材・年間計画」で設定できます）。</div>')
       + mField('種類', mSelect('gr-t-kind', d.kind, Object.keys(TASK_KINDS).map(function (k) { return [k, TASK_KINDS[k]]; })))
       + mField('学習内容', mInput('gr-t-content', d.content, { ph: '例題4〜6：講義＋演習' }), true)
       + mField('目安時間（分）', mInput('gr-t-minutes', d.minutes, { type: 'number', num: true, min: 0 }))
@@ -13993,9 +14116,17 @@ function ssApplyRoadmap(sd) {
     var md = S.modal, date = gv('gr-t-date');
     if (!date) { document.getElementById('gr-t-err').textContent = '日付を入力してください'; return; }
     var d = { date: date, subject: gv('gr-t-subject'), materialId: gv('gr-t-material') || null, kind: gv('gr-t-kind') || 'other', content: gv('gr-t-content').trim(), minutes: num(gv('gr-t-minutes')), qty: num(gv('gr-t-qty')), status: gv('gr-t-status') || 'todo' };
-    var counts = d.materialId && (d.kind === 'study' || d.kind === 'redo');
     var t = md.isNew ? null : taskById(md.id);
     if (!md.isNew && !t) { closeModal(); toast('この課題は他の画面で削除されたため、保存できませんでした'); rerender(); return; }
+    var addedBook = null;
+    if (d.materialId && d.materialId.indexOf('cat:') === 0) {
+      // 参考書フォルダの本 → この生徒の教材一覧に（まだ無ければ）追加して、その教材を課題に結びつける
+      var before = S.plan.materials.length, bm = ensureMaterialFromBook(d.materialId.slice(4), d.subject);
+      if (!bm) { document.getElementById('gr-t-err').textContent = 'この参考書は一覧に見つかりませんでした。画面を再読み込みしてからもう一度お試しください'; return; }
+      d.materialId = bm.id; if (!d.subject && bm.subject) d.subject = bm.subject;
+      if (S.plan.materials.length > before) addedBook = bm;
+    }
+    var counts = d.materialId && (d.kind === 'study' || d.kind === 'redo');
     if (!t) {
       t = { id: md.id, auto: false, edited: true, units: counts ? (d.qty || 0) : 0 };
       Object.keys(d).forEach(function (k) { t[k] = d[k]; });
@@ -14013,7 +14144,7 @@ function ssApplyRoadmap(sd) {
       if (d.status === 'todo' || d.status === 'missing') t.submittedAt = '';
       Object.keys(d).forEach(function (k) { t[k] = d[k]; });
     }
-    touch(); closeModal(); rerender(); toast(md.isNew ? '課題を追加しました' : '課題を更新しました');
+    touch(); closeModal(); rerender(); toast((md.isNew ? '課題を追加しました' : '課題を更新しました') + (addedBook ? '（教材一覧に「' + addedBook.name + '」を追加しました）' : ''));
   }
   function deleteTask(id) {
     var t = taskById(id); if (!t) return;
@@ -14157,7 +14288,7 @@ function ssApplyRoadmap(sd) {
       + '.gr-print-h{font-family:"Noto Serif JP",serif;font-size:15px;color:#1f3329;border-left:4px solid #a8843c;padding-left:8px;margin:0 0 8px}'
       + '.gr-print-top{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:2px solid #1f3329;padding-bottom:6px;margin-bottom:10px}'
       + '.gr-print-top .t{font-family:"Noto Serif JP",serif;font-size:18px;font-weight:700;color:#1f3329}.gr-print-top .s{font-size:11px;color:#7a857e}'
-      + '.gr-pv{white-space:pre-wrap;word-break:break-word}.gr-table td,.gr-table th{padding:5px 6px}.gr-gantt{min-width:0}.gr-table-wrap{overflow:visible}'
+      + '.gr-pv{white-space:pre-wrap;word-break:break-word}.gr-table td,.gr-table th{padding:5px 6px}.gr-gantt{min-width:0}.gr-table-wrap{overflow:visible}.gr-mocks{min-width:0!important}.gr-booklink{display:none}'
       + '.gr-grid-3{grid-template-columns:1.15fr 1fr 1fr!important}.gr-grid-2{grid-template-columns:1fr 1fr!important}.gr-grid-21{grid-template-columns:1.6fr 1fr!important}'
       + '</style></head><body><div class="gr-print-top"><div class="t">ガリレオ ' + esc(PAGES[pg].title) + '｜' + esc(S.student.name) + ' さん</div><div class="s">出力日：' + esc(jpDate(today())) + '</div></div>'
       + parts.join('') + '</body></html>';
@@ -14335,8 +14466,19 @@ function ssApplyRoadmap(sd) {
   };
   function castVal(el) { if (el.type === 'checkbox') return !!el.checked; return el.getAttribute('data-gr-type') === 'num' ? num(el.value) : el.value; }
   function modalChange(el) {
-    if (el.id === 'gr-m-subject') { var c = document.getElementById('gr-m-subject-custom'); if (c) c.style.display = el.value === '__custom' ? '' : 'none'; }
-    if (el.id === 'gr-t-subject') { var ms = document.getElementById('gr-t-material'); if (ms) ms.innerHTML = materialOptions(el.value, ''); }
+    if (el.id === 'gr-m-subject') {
+      var c = document.getElementById('gr-m-subject-custom'); if (c) c.style.display = el.value === '__custom' ? '' : 'none';
+      var cs = document.getElementById('gr-m-catalog'); if (cs) cs.innerHTML = catalogSelectHtml(el.value === '__custom' ? '' : el.value, S.modal && S.modal.driveId || '');
+    }
+    if (el.id === 'gr-m-catalog') {
+      // 参考書フォルダの本を選ぶ → 教材名に入れ、Driveのファイルと結びつける
+      var bk = el.value && el.value.indexOf('cat:') === 0 ? catalogById(el.value.slice(4)) : null;
+      if (bk && S.modal) { var nm = document.getElementById('gr-m-name'); if (nm) nm.value = bk.name; S.modal.driveId = bk.id; S.modal.link = bk.url; }
+      else if (S.modal) { S.modal.driveId = null; S.modal.link = ''; }
+      updateMatCalc(); return;
+    }
+    if (el.id === 'gr-t-subject') { var ms = document.getElementById('gr-t-material'); if (ms) { ms.innerHTML = materialOptions(el.value, '', true); var mn0 = document.getElementById('gr-t-mnote'); if (mn0) mn0.style.display = 'none'; } }
+    if (el.id === 'gr-t-material') { var mn1 = document.getElementById('gr-t-mnote'); if (mn1) mn1.style.display = el.value.indexOf('cat:') === 0 ? '' : 'none'; }
     if (el.id === 'gr-rv-subject') { var rs = document.getElementById('gr-rv-material'); if (rs) rs.innerHTML = materialOptions(el.value, ''); }
     if ((el.id && el.id.indexOf('gr-m-') === 0) || (el.classList && el.classList.contains('gr-m-day'))) updateMatCalc();
   }
@@ -14399,11 +14541,10 @@ function ssApplyRoadmap(sd) {
 
   function init() {
     if (!document.getElementById('gr-books')) {
-      var names = BOOK_SUGGEST.slice();
-      try { if (typeof ALL_TEXTBOOKS !== 'undefined' && Array.isArray(ALL_TEXTBOOKS)) ALL_TEXTBOOKS.forEach(function (b) { if (b && b.name && names.indexOf(b.name) < 0) names.push(b.name); }); } catch (e) { }
       var dl = document.createElement('datalist'); dl.id = 'gr-books';
-      dl.innerHTML = names.map(function (n) { return '<option value="' + esc(n) + '">'; }).join('');
       document.body.appendChild(dl);
+      refreshBookList();
+      loadCatalog();
       var dl2 = document.createElement('datalist'); dl2.id = 'gr-unitlabels';
       dl2.innerHTML = ['例題', '問題', '小単元', '単元', '章', '課', 'ページ', 'セクション'].map(function (n) { return '<option value="' + n + '">'; }).join('');
       document.body.appendChild(dl2);
@@ -14428,9 +14569,13 @@ function ssApplyRoadmap(sd) {
     mockTrendHtml: mockTrendHtml,
     planFor: planFor,
     sheetDataAsync: function (st) { return planForAsync(st).then(function (p) { return sheetDataFrom(st, p); }); },
+    // 参考書フォルダのカタログ（books.json）
+    loadCatalog: loadCatalog,
+    catalog: function () { return S.catalog; },
     _debug: { state: S, alloc: alloc, computeAlloc: computeAlloc, matStats: matStats, subjectStats: subjectStats, genWeek: genWeek, autoStages: autoStages, createPlanFor: createPlanFor,
       mergePlans: mergePlans, normalizePlan: normalizePlan, migrate: migrate, checkRemote: checkRemote, pushCloud: pushCloud, derivedFrom: derivedFrom, syncFromStudent: syncFromStudent,
-      weeksOfMonth: weeksOfMonth, weekAutoRange: weekAutoRange, weekGoal: weekGoal, weekText: weekText }
+      weeksOfMonth: weeksOfMonth, weekAutoRange: weekAutoRange, weekGoal: weekGoal, weekText: weekText,
+      catalogOptionsHtml: catalogOptionsHtml, ensureMaterialFromBook: ensureMaterialFromBook, catalogBookByName: catalogBookByName, materialOptions: materialOptions }
   };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 })();

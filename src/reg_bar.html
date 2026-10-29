@@ -1,0 +1,9 @@
+    <!-- v1.2.2：登録済みの生徒の編集 -->
+    <div class="card" id="reg-edit-bar" style="margin-bottom:1.5rem;padding:12px 16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+      <span style="font-size:12.5px;font-weight:700;color:var(--ink);white-space:nowrap;">登録済みの生徒を編集</span>
+      <select id="reg-edit-sel" onchange="regLoadStudent(this.value)" style="padding:7px 10px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px;background:white;color:var(--ink);min-width:200px;">
+        <option value="">── 生徒を選択 ──</option>
+      </select>
+      <span id="reg-edit-status" style="font-size:12px;color:var(--text-muted);line-height:1.6;flex:1;min-width:240px;">新規登録です。登録済みの生徒を選ぶと、いまの内容がフォームに入ります。</span>
+      <button type="button" class="btn btn-secondary" onclick="regResetForm()" style="font-size:12px;white-space:nowrap;">新規登録に戻す（フォームを空にする）</button>
+    </div>
