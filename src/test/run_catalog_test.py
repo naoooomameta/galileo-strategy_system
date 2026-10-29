@@ -62,11 +62,11 @@ try:
         # カタログの読み込み
         page.wait_for_function('() => window.GR && GR.catalog() && GR.catalog().books.length > 0', timeout=5000)
         cat = page.evaluate('() => GR.catalog()')
-        ok(cat['count'] == 7 and len(cat['books']) == 7, 'books.json を読み込む: %d冊' % len(cat['books']))
+        ok(cat['count'] == 8 and len(cat['books']) == 8, 'books.json を読み込む: %d冊' % len(cat['books']))
         dl = page.eval_on_selector_all('#gr-books option', 'els => els.map(e => e.value)')
         ok('【青】チャート式 基礎からの数学I+A チャート研究所' in dl and '入門問題精講 数学I・A' in dl, '教材名の入力候補にカタログの本が加わる（%d件）' % len(dl))
         ls = page.evaluate("() => JSON.parse(localStorage.getItem('galileo_grbooks') || 'null')")
-        ok(ls and ls.get('count') == 7, '端末にもカタログを保存')
+        ok(ls and ls.get('count') == 8, '端末にもカタログを保存')
 
         # 生徒 → 計画作成
         page.click('.nav-btn:has-text("合格ロードマップ")'); page.wait_for_timeout(300)
@@ -98,8 +98,10 @@ try:
         opts = options(page, '#gr-m-catalog')
         groups = sorted(set(o[2] for o in opts if o[2]))
         vals = [o[0] for o in opts]
-        ok('cat:b1' in vals and 'cat:b3' in vals and 'cat:b6' in vals and 'cat:b4' not in vals and 'cat:b7' not in vals, '科目で絞り込み（数学＋科目なしの本）: %s' % vals)
-        ok(groups == ['参考書フォルダ：志望校対策', '参考書フォルダ：数学／１A', '参考書フォルダ：数学／２B'], 'フォルダごとのグループ: %s' % groups)
+        ok('cat:b1' in vals and 'cat:b3' in vals and 'cat:b6' in vals and 'cat:b4' not in vals and 'cat:b7' not in vals and 'cat:b8' not in vals, '科目で絞り込み（数学＋志望校対策・その他。理科／中学生は出ない）: %s' % vals)
+        order = [o[2] for o in opts if o[2]]
+        order = [g for i, g in enumerate(order) if i == 0 or order[i - 1] != g]
+        ok(order == ['参考書フォルダ：数学／１A', '参考書フォルダ：数学／２B', '参考書フォルダ：志望校対策'], 'フォルダごとのグループ（科目のフォルダ→志望校対策の順）: %s' % order)
         page.select_option('#gr-m-catalog', 'cat:b1'); page.wait_for_timeout(150)
         ok(page.input_value('#gr-m-name') == '1対1対応の演習 数学1 大学への数学', '選ぶと教材名に入る')
         page.fill('#gr-m-count', '50'); page.fill('#gr-m-start', '2026-11-02'); page.fill('#gr-m-end', '2026-12-25')
@@ -133,7 +135,10 @@ try:
         opts = options(page, '#gr-t-material')
         vals = [o[0] for o in opts]
         own = [o for o in opts if o[2] == 'この生徒の教材']
-        ok(len(own) == 3 and 'cat:b1' not in vals and 'cat:b4' not in vals and 'cat:b2' in vals and 'cat:b7' in vals and 'cat:b6' in vals, '科目なし：この生徒の教材＋未登録の本すべて: %s' % vals)
+        ok(len(own) == 3 and 'cat:b1' not in vals and 'cat:b4' not in vals and 'cat:b2' in vals and 'cat:b7' in vals and 'cat:b6' in vals and 'cat:b8' in vals, '科目なし：この生徒の教材＋未登録の本すべて: %s' % vals)
+        order = [o[2] for o in opts if o[2]]
+        order = [g for i, g in enumerate(order) if i == 0 or order[i - 1] != g]
+        ok(order[0] == 'この生徒の教材' and order[1].endswith('英語／英単語帳') and order[-1].endswith('志望校対策') and order[-2].endswith('理科／中学生'), '科目なしの並び：英語→数学→…→科目なし→志望校対策: %s' % order)
         page.select_option('#gr-t-subject', '数学'); page.wait_for_timeout(150)
         opts = options(page, '#gr-t-material'); vals = [o[0] for o in opts]
         ok('cat:b3' in vals and 'cat:b2' in vals and 'cat:b6' in vals and 'cat:b7' not in vals and 'cat:b5' not in vals and m1[0]['id'] in vals, '数学で絞り込み: %s' % vals)
@@ -189,7 +194,7 @@ try:
         page.route('http://127.0.0.1:8768/books.json', lambda r: r.fulfill(status=404, body='nope'))
         page.reload(); login(page)
         c2 = page.evaluate('() => GR.catalog()')
-        ok(c2 and c2['count'] == 7, '取得に失敗しても端末に保存した一覧を使う')
+        ok(c2 and c2['count'] == 8, '取得に失敗しても端末に保存した一覧を使う')
         st = page.evaluate('() => GR._debug.state.catalogState')
         ok(st == 'error', '取得失敗の状態: %s' % st)
         page.unroute('http://127.0.0.1:8768/books.json')

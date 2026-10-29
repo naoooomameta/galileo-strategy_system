@@ -15,10 +15,18 @@
   function catalogBooks() { return (S.catalog && Array.isArray(S.catalog.books)) ? S.catalog.books : []; }
   function catalogById(id) { return catalogBooks().filter(function (b) { return b.id === id; })[0] || null; }
   function normBook(s) { return String(s || '').replace(/[\s　_・･]+/g, '').toLowerCase(); }
-  // 科目が決まっていれば、その科目の本＋科目の決まっていない本（志望校対策・その他）
+  // 科目をまたぐフォルダ（科目で絞り込んでも常に出す）
+  var CATALOG_CROSS = ['志望校対策', 'その他'];
+  function topFolder(b) { return String(b.path || '').split('／')[0]; }
+  // 科目が決まっていれば、その科目の本＋科目をまたぐフォルダの本
   function catalogBooksFor(subject) {
     var all = catalogBooks();
-    return subject ? all.filter(function (b) { return b.subject === subject || !b.subject; }) : all;
+    return subject ? all.filter(function (b) { return b.subject === subject || (!b.subject && CATALOG_CROSS.indexOf(topFolder(b)) >= 0); }) : all;
+  }
+  // グループ（フォルダ）の並び：科目の順（英語・数学・物理…）→ 科目の決まっていないフォルダ → 科目をまたぐフォルダは最後
+  function groupRank(books) {
+    var b = books[0] || {}, i = SUBJECT_ORDER.indexOf(b.subject);
+    return CATALOG_CROSS.indexOf(topFolder(b)) >= 0 ? 99 : (b.subject ? (i < 0 ? 50 : i) : 80);
   }
   // この生徒の教材一覧に同じ本があればその教材
   function planMaterialForBook(b) {
@@ -39,6 +47,7 @@
       if (!map[g]) { map[g] = []; groups.push(g); }
       map[g].push(b);
     });
+    groups.sort(function (a, b) { var ra = groupRank(map[a]), rb = groupRank(map[b]); return ra - rb || (a < b ? -1 : a > b ? 1 : 0); });
     return groups.map(function (g) {
       return '<optgroup label="' + esc('参考書フォルダ：' + g) + '">' + map[g].map(function (b) {
         return '<option value="cat:' + esc(b.id) + '"' + (b.id === selectedId ? ' selected' : '') + '>' + esc(b.name) + '</option>';
