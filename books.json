@@ -1,11 +1,11 @@
 {
- "updatedAt": "2026-11-01T20:24:51Z",
+ "updatedAt": "2026-11-08T20:24:18Z",
  "source": {
   "folderId": "1Kr4L3IoSqlhnVIm56SdikhOI8EXJNE7V",
   "name": "プラトン・ガリレオ共通.（参考書）毎日課題",
   "url": "https://drive.google.com/drive/folders/1Kr4L3IoSqlhnVIm56SdikhOI8EXJNE7V"
  },
- "count": 296,
+ "count": 306,
  "books": [
   {
    "id": "1JFg81KrxWq-OYrTz9n9oMjdNffwi9AvL",
@@ -36,11 +36,25 @@
    "url": "https://drive.google.com/file/d/1W97Tdr64xZ_t5REY-7G1tkARAH0_3B0w/view"
   },
   {
+   "id": "1Aar9vPuWPYn80lRA-U0WfTIavows_2KZ",
+   "name": "わからないをわかるにかえる!中学国語 古文・漢文",
+   "subject": "国語",
+   "path": "国語／中学生",
+   "url": "https://drive.google.com/file/d/1Aar9vPuWPYn80lRA-U0WfTIavows_2KZ/view"
+  },
+  {
    "id": "16Hy30V7ocawbE8DMCIPkK1UOK6wpSxxd",
    "name": "中学 標準問題集 国語読解 中学教育研究会",
    "subject": "国語",
    "path": "国語／中学生",
    "url": "https://drive.google.com/file/d/16Hy30V7ocawbE8DMCIPkK1UOK6wpSxxd/view"
+  },
+  {
+   "id": "1iMs11Iz4l5Cqz2V3yCPq0YGJiGvAsL2_",
+   "name": "中学国語をひとつひとつわかりやすく。改訂版 中学ひとつひとつわかりやすく",
+   "subject": "国語",
+   "path": "国語／中学生",
+   "url": "https://drive.google.com/file/d/1iMs11Iz4l5Cqz2V3yCPq0YGJiGvAsL2_/view"
   },
   {
    "id": "1AQHImYjs5wmEaITkvwjpbw6D-_Ndpkw5",
@@ -134,6 +148,13 @@
    "url": "https://drive.google.com/file/d/1j1pAUz-1dNGArnmawJAS0OgSdUqN5JUx/view"
   },
   {
+   "id": "16phv7WciFdv39qTb2gIZQCDkL-Waeh-i",
+   "name": "古文読解演習ドリル",
+   "subject": "国語",
+   "path": "国語／古文",
+   "url": "https://drive.google.com/file/d/16phv7WciFdv39qTb2gIZQCDkL-Waeh-i/view"
+  },
+  {
    "id": "1ErUt2-DfVmNBrz6N5i1r6p0khzsuM1HU",
    "name": "大学入試 知らなきゃ解けない 古文常識・和歌",
    "subject": "国語",
@@ -160,6 +181,13 @@
    "subject": "国語",
    "path": "国語／古文",
    "url": "https://drive.google.com/file/d/1PKNHjclGPpNLtehRGKwfFc9ZN7xlMqHa/view"
+  },
+  {
+   "id": "1sFKAdG4HYbGWNXUXiEh8ZtiMjv7Jl_vW",
+   "name": "岡本梨奈の1冊読むだけで古文の読み方＆解き方が面白いほど身につく本",
+   "subject": "国語",
+   "path": "国語／古文",
+   "url": "https://drive.google.com/file/d/1sFKAdG4HYbGWNXUXiEh8ZtiMjv7Jl_vW/view"
   },
   {
    "id": "185UMTw8LYKNbCf5-6V1ZBWlG1vsCgJEe",
@@ -258,6 +286,20 @@
    "subject": "国語",
    "path": "国語／現代文",
    "url": "https://drive.google.com/file/d/1iB0iosjm7rj5cfRAHAjOabEyqPzNA5vP/view"
+  },
+  {
+   "id": "11gKGFOcPgxljoDnvL4chuT1CAP1VBSK2",
+   "name": "ゼロから覚醒 はじめよう現代文",
+   "subject": "国語",
+   "path": "国語／現代文",
+   "url": "https://drive.google.com/file/d/11gKGFOcPgxljoDnvL4chuT1CAP1VBSK2/view"
+  },
+  {
+   "id": "1oTCHG-ZBMGzpg8ogYM27Jsy6JREeJvyD",
+   "name": "ゼロから覚醒Final 読解力完成現代文",
+   "subject": "国語",
+   "path": "国語／現代文",
+   "url": "https://drive.google.com/file/d/1oTCHG-ZBMGzpg8ogYM27Jsy6JREeJvyD/view"
   },
   {
    "id": "12idMb-COYsMrWGac5awP_t-_g2VIYGaZ",
@@ -596,6 +638,13 @@
    "url": "https://drive.google.com/file/d/1zF6lQPK_r_GqCJ3n9mo977SosFXvkEM0/view"
   },
   {
+   "id": "1y3lmqnGiJvhPVfBe-6cXoKi26clGlYHp",
+   "name": "共通テスト総合問題集数学1,数学A. 2027",
+   "subject": "数学",
+   "path": "数学／１A",
+   "url": "https://drive.google.com/file/d/1y3lmqnGiJvhPVfBe-6cXoKi26clGlYHp/view"
+  },
+  {
    "id": "1k5pkSK1N7pl_c--mOWEdKnrl_o3ZIVWV",
    "name": "数学1･A入門問題精講",
    "subject": "数学",
@@ -678,6 +727,13 @@
    "subject": "数学",
    "path": "数学／２B",
    "url": "https://drive.google.com/file/d/1Y5Gs1m1Xhb-zfA-I9jnlYivz37VkIrvd/view"
+  },
+  {
+   "id": "1FkWo-K_g32FBe5CJ0YEUiqArVBht8PO-",
+   "name": "共通テスト総合問題集数学2,数学B,数学C. 2027",
+   "subject": "数学",
+   "path": "数学／２B",
+   "url": "https://drive.google.com/file/d/1FkWo-K_g32FBe5CJ0YEUiqArVBht8PO-/view"
   },
   {
    "id": "1TZQTBVjyIozMp_iNf7fcJ9VQ1FGooWRY",
@@ -1814,6 +1870,13 @@
    "url": "https://drive.google.com/file/d/1m57J1NFd6Y3JlUgEQH2FL6riwRAvF0D_/view"
   },
   {
+   "id": "17wbnKh4_sLgr50beoq2msf7uSx03HOIP",
+   "name": "スクランブル英文法･語法",
+   "subject": "英語",
+   "path": "英語／英文法",
+   "url": "https://drive.google.com/file/d/17wbnKh4_sLgr50beoq2msf7uSx03HOIP/view"
+  },
+  {
    "id": "1_mQCRDl-6zAFjaelI4SLueLKigJHL2SS",
    "name": "中学英語をもう一度ひとつひとつわかりやすく。",
    "subject": "英語",
@@ -1833,6 +1896,13 @@
    "subject": "英語",
    "path": "英語／英文法",
    "url": "https://drive.google.com/file/d/1A-M88DHsBNOd1TMcdkx6B-xiw5YfmrrI/view"
+  },
+  {
+   "id": "1cSP6uC_aB4cc2YwBnFZNwCgXdA349WWB",
+   "name": "大学入試問題集 関正生の英文法ファイナル演習ポラリス［３ 発展レベル］",
+   "subject": "英語",
+   "path": "英語／英文法",
+   "url": "https://drive.google.com/file/d/1cSP6uC_aB4cc2YwBnFZNwCgXdA349WWB/view"
   },
   {
    "id": "1IPPMWUyh75Uvn4_uldkVyDjZrzssIC74",
